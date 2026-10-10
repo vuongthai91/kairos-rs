@@ -15,8 +15,9 @@ use kairos_rs::middleware::security::security_headers;
 use kairos_rs::models::settings::Settings;
 use kairos_rs::observability::middleware::TracingMiddleware;
 use kairos_rs::observability::tracing as obs_tracing;
-use kairos_rs::routes::{auth_http, config_reload, health, management, metrics, telemetry, websocket, websocket_admin};
+use kairos_rs::routes::{auth_http, config_reload, grpc, health, management, metrics, telemetry, websocket, websocket_admin};
 use kairos_rs::services::http::RouteHandler;
+use kairos_rs::services::grpc::GrpcService;
 use kairos_rs::services::metrics_store::MetricsStore;
 use kairos_rs::services::websocket::WebSocketHandler;
 
@@ -228,12 +229,26 @@ async fn main() -> std::io::Result<()> {
                 // PR8: read-only telemetry status endpoint
                 // (`GET /api/telemetry`) for the frontend panel.
                 .configure(telemetry::configure_telemetry)
+                // PR9: gRPC reverse proxy on the same port. The
+                // `GrpcContentTypeGuard` ensures only requests
+                // with `Content-Type: application/grpc[+...]`
+                // reach this handler; everything else falls
+                // through to the existing HTTP route table.
+                .app_data(actix_web::web::Data::new(grpc::GrpcState::new(
+                    GrpcService::new(),
+                    std::sync::Arc::new(config.routers.clone()),
+                )))
+                .configure(grpc::configure_grpc)
                 .configure(|cfg| websocket::configure_websocket(cfg, websocket_handler.clone()))
                 .configure(|cfg| {
                     auth_http::configure_auth_routes(cfg, route_handler.clone(), &config)
                 })
         })
-        .bind((host.as_str(), port))?
+        // PR9: accept HTTP/2 (h2c with prior knowledge) on the
+        // same port as HTTP/1.1. gRPC clients configured for
+        // `http2_prior_knowledge()` connect to this port; other
+        // gRPC traffic falls through to the normal HTTP/1.1 path.
+        .bind_auto_h2c((host.as_str(), port))?
         .run()
     } else {
         info!("Using basic rate limiting (100 req/sec, 200 burst)");
@@ -272,12 +287,26 @@ async fn main() -> std::io::Result<()> {
                 // PR8: read-only telemetry status endpoint
                 // (`GET /api/telemetry`) for the frontend panel.
                 .configure(telemetry::configure_telemetry)
+                // PR9: gRPC reverse proxy on the same port. The
+                // `GrpcContentTypeGuard` ensures only requests
+                // with `Content-Type: application/grpc[+...]`
+                // reach this handler; everything else falls
+                // through to the existing HTTP route table.
+                .app_data(actix_web::web::Data::new(grpc::GrpcState::new(
+                    GrpcService::new(),
+                    std::sync::Arc::new(config.routers.clone()),
+                )))
+                .configure(grpc::configure_grpc)
                 .configure(|cfg| websocket::configure_websocket(cfg, websocket_handler.clone()))
                 .configure(|cfg| {
                     auth_http::configure_auth_routes(cfg, route_handler.clone(), &config)
                 })
         })
-        .bind((host.as_str(), port))?
+        // PR9: accept HTTP/2 (h2c with prior knowledge) on the
+        // same port as HTTP/1.1. gRPC clients configured for
+        // `http2_prior_knowledge()` connect to this port; other
+        // gRPC traffic falls through to the normal HTTP/1.1 path.
+        .bind_auto_h2c((host.as_str(), port))?
         .run()
     };
 

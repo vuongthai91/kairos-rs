@@ -117,6 +117,23 @@
       "internal_path": "/delay/1",
       "methods": ["GET"],
       "auth_required": false
+    },
+    {
+      "_comment": "PR9 — gRPC reverse proxy. Matches any path under /grpc.* (gRPC service paths are conventionally /<package>.<svc>/<method>). v1 supports unary calls only; client streaming, server streaming, and bidi are not yet supported. The gateway accepts both HTTP/1.1 and HTTP/2 (h2c with prior knowledge) on the same port, so a tonic / grpcurl client with http2_prior_knowledge() connects directly.",
+      "backends": [
+        {
+          "host": "127.0.0.1",
+          "port": 50051,
+          "weight": 1,
+          "health_check_path": null
+        }
+      ],
+      "load_balancing_strategy": "round_robin",
+      "external_path": "/grpc.health.v1.Health/",
+      "internal_path": "/grpc.health.v1.Health/",
+      "methods": ["POST"],
+      "auth_required": false,
+      "protocol": "grpc"
     }
   ]
 }

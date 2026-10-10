@@ -20,7 +20,7 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
 # Web framework dependencies
-actix-web = "4"
+actix-web = { version = "4", features = ["http2"] }
 actix-governor = "0.5"
 
 # CLI dependencies  
@@ -51,6 +51,12 @@ opentelemetry-otlp = { version = "0.17", features = ["tonic", "grpc-tonic"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-opentelemetry = "0.25"
+# gRPC proxying (PR9)
+http = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1", "http2"] }
+tonic = "0.12"
+tower-service = "0.3"
 
 # Protocol-specific dependencies
 tokio-tungstenite = "0.21"

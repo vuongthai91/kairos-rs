@@ -86,6 +86,9 @@
 
 pub mod auth_http;
 pub mod config_reload;
+pub mod dns;
+pub mod ftp;
+pub mod grpc;
 pub mod health;
 pub mod http;
 pub mod management;
@@ -93,5 +96,3 @@ pub mod metrics;
 pub mod telemetry;
 pub mod websocket;
 pub mod websocket_admin;
-pub mod ftp;
-pub mod dns;
