@@ -38,6 +38,11 @@ const router = createRouter({
       name: 'config',
       component: () => import('../views/Config.vue'),
     },
+    {
+      path: '/telemetry',
+      name: 'telemetry',
+      component: () => import('../views/Telemetry.vue'),
+    },
   ],
 });
 

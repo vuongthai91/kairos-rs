@@ -19,6 +19,7 @@ import type {
   LatencyPercentileQuery,
   PercentilePoint,
 } from '../types';
+import type { TelemetryStatus } from '../types/telemetry';
 
 const API_BASE = '/api';
 
@@ -311,5 +312,17 @@ export const apiService = {
         body: errorMessage,
       };
     }
+  },
+
+  // PR8 — OpenTelemetry telemetry status
+  async getTelemetryStatus(): Promise<TelemetryStatus> {
+    const res = await fetch(`${API_BASE}/telemetry`);
+    if (!res.ok) {
+      const err = await res
+        .json()
+        .catch(() => ({ message: 'Failed to fetch telemetry status' }));
+      throw new Error(err.message || 'Failed to fetch telemetry status');
+    }
+    return (await res.json()) as TelemetryStatus;
   },
 };

@@ -20,6 +20,8 @@ const routeTitle = computed(() => {
       return 'Security & Client API Keys';
     case 'config':
       return 'Global Gateway Configuration';
+    case 'telemetry':
+      return 'OpenTelemetry Distributed Tracing';
     default:
       return 'Admin Console';
   }
@@ -82,6 +84,11 @@ const routeTitle = computed(() => {
         <RouterLink to="/config">
           <span class="nav-icon">⚙️</span>
           <span>Config</span>
+        </RouterLink>
+
+        <RouterLink to="/telemetry">
+          <span class="nav-icon">🛰️</span>
+          <span>Telemetry</span>
         </RouterLink>
       </nav>
 
