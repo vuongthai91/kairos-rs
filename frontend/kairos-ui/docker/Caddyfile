@@ -1,0 +1,36 @@
+# Plain HTTP only — sits behind the docker host port mapping (8080 → container 80).
+{
+    auto_https off
+    admin off
+}
+
+:80 {
+    encode zstd gzip
+
+    # Path matchers — gateway reverse proxies win for these prefixes.
+    @api     path /api/*
+    @health  path /health /metrics
+    @ws      path /ws/*
+
+    # Anything else is treated as an SPA path: never send /api, /health, /metrics, /ws
+    # to file_server/try_files. The @not_api matcher enforces that.
+    @not_api not path /api/* /health /metrics /ws/*
+
+    # Reverse proxies first — they terminate matching requests before any rewrite
+    # or file_server runs.
+    reverse_proxy @api    kairos-gateway:5900
+    reverse_proxy @health kairos-gateway:5900
+    reverse_proxy @ws     kairos-gateway:5900
+
+    # Vite-emitted hashed assets get long-lived cache headers.
+    @assets path /assets/*
+    header @assets Cache-Control "public, max-age=31536000, immutable"
+
+    # SPA fallback only for non-API paths. Scoped under a `route` so the
+    # @not_api matcher gates the whole file-serving block (rewrite + serve).
+    route @not_api {
+        root * /srv
+        try_files {path} {path}/ /index.html
+        file_server
+    }
+}
