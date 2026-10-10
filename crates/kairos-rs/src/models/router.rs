@@ -2,34 +2,42 @@ use serde::{Deserialize, Serialize};
 use crate::middleware::transform::{RequestTransformation, ResponseTransformation};
 
 /// Protocol type for the gateway route.
-/// 
+///
 /// Defines which protocol the gateway should use when handling requests
 /// for a specific route. Different protocols have different handling requirements.
-/// 
+///
 /// # Protocols
-/// 
+///
 /// - **HTTP**: Standard HTTP/HTTPS protocol (default)
 /// - **WebSocket**: Bidirectional, real-time communication protocol
 /// - **FTP**: File Transfer Protocol for file operations
 /// - **DNS**: Domain Name System for DNS query forwarding
+/// - **gRPC**: gRPC over HTTP/2 (h2c with prior knowledge on the same
+///   port as HTTP/1.1; uses the gateway's `bind_auto_h2c` listener)
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Protocol {
     /// HTTP/HTTPS protocol (default).
     /// Used for standard REST APIs and web applications.
     Http,
-    
+
     /// WebSocket protocol.
     /// Enables bidirectional, real-time communication.
     WebSocket,
-    
+
     /// File Transfer Protocol.
     /// Used for file upload/download operations.
     Ftp,
-    
+
     /// Domain Name System protocol.
     /// Used for DNS query forwarding and caching.
     Dns,
+
+    /// gRPC over HTTP/2.
+    /// Matches requests with `Content-Type: application/grpc[+...]` and
+    /// proxies the wire-format frames to the configured backend using a
+    /// generic `tonic::transport::Channel` (no code generation).
+    Grpc,
 }
 
 impl Default for Protocol {
@@ -45,6 +53,7 @@ impl std::fmt::Display for Protocol {
             Protocol::WebSocket => write!(f, "websocket"),
             Protocol::Ftp => write!(f, "ftp"),
             Protocol::Dns => write!(f, "dns"),
+            Protocol::Grpc => write!(f, "grpc"),
         }
     }
 }

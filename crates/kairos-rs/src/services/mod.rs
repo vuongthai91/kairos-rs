@@ -83,6 +83,8 @@ pub mod circuit_breaker;
 pub mod cache;
 pub mod dns;
 pub mod ftp;
+pub mod grpc;
+pub mod grpc_frame;
 pub mod http;
 pub mod inflight;
 pub mod load_balancer;

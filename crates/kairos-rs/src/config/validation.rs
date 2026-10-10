@@ -447,6 +447,16 @@ impl ConfigValidator {
                 Protocol::Http => {
                     // Existing HTTP validation (already covered above)
                 }
+                Protocol::Grpc => {
+                    // gRPC wire spec requires POST; warn so existing
+                    // configs without explicit `methods` keep working.
+                    if !router.methods.contains(&"POST".to_string()) {
+                        result.add_warning(format!(
+                            "gRPC route {} should allow POST method",
+                            router.external_path
+                        ));
+                    }
+                }
             }
         }
     }
