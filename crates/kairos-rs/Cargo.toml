@@ -49,6 +49,7 @@ http.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 tonic.workspace = true
+tower.workspace = true
 tower-service.workspace = true
 
 # Protocol-specific dependencies

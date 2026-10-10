@@ -30,13 +30,15 @@
 //! connection pool) but works for typical gRPC workloads.
 
 use bytes::Bytes;
+use futures_util::FutureExt;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use log::{debug, error};
 use std::time::Duration;
 use tonic::body::BoxBody;
 use tonic::transport::Channel;
-use tower_service::Service;
+use tower::Service;
+use tower::ServiceExt;
 
 use crate::models::router::{Backend, Router};
 
@@ -106,6 +108,10 @@ pub enum GrpcError {
     /// The upstream call exceeded the configured timeout.
     #[error("upstream call timed out")]
     Timeout,
+    /// The tower::Buffer wrapping the channel returned an
+    /// opaque error that wasn't a tonic transport error.
+    #[error("buffer error: {0}")]
+    Buffer(String),
 }
 
 /// Build the URI that `tonic::transport::Endpoint` expects. We
@@ -147,14 +153,37 @@ pub async fn forward_unary(
     // type (Infallible) into tonic::Status so the wrap is total.
     let body: BoxBody = BoxBody::new(body.map_err(|_| unreachable!("Full<Bytes> error is Infallible")));
     let request = http::Request::from_parts(parts, body);
-    let mut channel = channel;
-    let response = tokio::time::timeout(service.timeout, channel.call(request))
+    // Wrap the channel in a tower::Buffer so `.call()` is safe
+    // to drive directly without manual poll_ready ceremony.
+    // The buffer holds one in-flight request, which is enough
+    // for v1 (one actix request = one tonic call).
+    let mut svc = tower::ServiceBuilder::new().buffer(1).service(channel);
+    // `poll_ready` reserves a permit in the buffer; without it
+    // `call()` would panic. `Service::ready()` returns a
+    // `Ready<Self, Request>` future that drives poll_ready and
+    // self-references into the service.
+    let _ready = svc.ready().await.map_err(|e| {
+        error!("grpc not ready: {}", e);
+        GrpcError::Buffer(format!("ready: {}", e))
+    })?;
+    let response = tokio::time::timeout(service.timeout, svc.call(request))
         .await
         .map_err(|_| {
             error!("grpc call timed out after {:?}", service.timeout);
             GrpcError::Timeout
-        })?
-        .map_err(map_transport_err)?;
+        })?;
+    // The buffer's error type is `Box<dyn StdError + Send + Sync>`,
+    // not the inner service's error. Downcast to recover the
+    // tonic transport error when possible.
+    let response = response.map_err(|e| {
+        match e.downcast::<tonic::transport::Error>() {
+            Ok(te) => map_transport_err(*te),
+            Err(orig) => {
+                error!("grpc buffer error: {}", orig);
+                GrpcError::Buffer(orig.to_string())
+            }
+        }
+    })?;
     Ok(response)
 }
 

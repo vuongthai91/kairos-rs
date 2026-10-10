@@ -156,6 +156,9 @@ pub async fn grpc_catch_all(
                 .content_type("application/grpc")
                 .body(grpc_error_frame(13, "invalid backend URI")),
         ),
+        Err(crate::services::grpc::GrpcError::Buffer(_)) => Ok(HttpResponse::BadGateway()
+            .content_type("application/grpc")
+            .body(grpc_error_frame(14, "upstream buffer error"))),
         Err(crate::services::grpc::GrpcError::Transport(_)) => Ok(HttpResponse::BadGateway()
             .content_type("application/grpc")
             .body(grpc_error_frame(14, "upstream unreachable"))),
