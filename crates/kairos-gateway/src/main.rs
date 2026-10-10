@@ -13,7 +13,9 @@ use kairos_rs::middleware::compression::{self as compression_mw, CompressionConf
 use kairos_rs::middleware::rate_limit::AdvancedRateLimit;
 use kairos_rs::middleware::security::security_headers;
 use kairos_rs::models::settings::Settings;
-use kairos_rs::routes::{auth_http, config_reload, health, management, metrics, websocket, websocket_admin};
+use kairos_rs::observability::middleware::TracingMiddleware;
+use kairos_rs::observability::tracing as obs_tracing;
+use kairos_rs::routes::{auth_http, config_reload, health, management, metrics, telemetry, websocket, websocket_admin};
 use kairos_rs::services::http::RouteHandler;
 use kairos_rs::services::metrics_store::MetricsStore;
 use kairos_rs::services::websocket::WebSocketHandler;
@@ -64,6 +66,28 @@ async fn main() -> std::io::Result<()> {
         "Configuration validated successfully with {} warnings",
         validation_result.warnings.len()
     );
+
+    // PR8: initialize OpenTelemetry tracing. When `enabled = false`
+    // or `otlp_endpoint` is unset, `init_telemetry` returns `None`
+    // and the gateway keeps running with zero overhead — the
+    // middleware / RouteHandler helpers all short-circuit on
+    // `is_initialized() == false`.
+    let telemetry_cfg = config.telemetry.clone().unwrap_or_default();
+    if let Err(e) = telemetry_cfg.validate() {
+        error!("Invalid telemetry config: {}", e);
+        std::process::exit(1);
+    }
+    let _telemetry_guard = obs_tracing::init_telemetry(&telemetry_cfg);
+    if telemetry_cfg.enabled {
+        info!(
+            "OpenTelemetry tracing enabled: endpoint={}, service={}, sample_ratio={}",
+            telemetry_cfg.otlp_endpoint.as_deref().unwrap_or(""),
+            telemetry_cfg.service_name,
+            telemetry_cfg.sample_ratio,
+        );
+    } else {
+        info!("OpenTelemetry tracing disabled");
+    }
 
     let mut route_handler = RouteHandler::new(config.routers.clone(), 30); // 30 second timeout
 
@@ -174,10 +198,19 @@ async fn main() -> std::io::Result<()> {
                 .app_data(actix_web::web::Data::new(route_handler.clone()))
                 .app_data(actix_web::web::Data::new(config_manager.clone()))
                 .wrap(advanced_rate_limit.clone())
+                // PR8: outermost tracing middleware — every other
+                // middleware (logger, security, compression, ...)
+                // runs inside the `http.request` span, so the
+                // exporter sees a single end-to-end span tree.
+                .wrap(TracingMiddleware)
                 .wrap(Logger::new(
                     r#"%a "%r" %s %b "%{Referer}i" "%{User-Agent}i" %T"#,
                 ))
                 .wrap(security_headers())
+                // PR8: serve `GET /api/telemetry` (read-only status
+                // for the frontend panel). Handler needs the
+                // startup `Settings` snapshot.
+                .app_data(actix_web::web::Data::new(config.clone()))
                 // PR5: response compression (gzip / brotli / deflate).
                 // `build` returns None when the config disables compression,
                 // in which case the helper falls back to a no-op DefaultHeaders.
@@ -192,6 +225,9 @@ async fn main() -> std::io::Result<()> {
                 .configure(websocket_admin::configure_admin_websocket)
                 .configure(management::configure_management)
                 .configure(config_reload::configure_config_reload)
+                // PR8: read-only telemetry status endpoint
+                // (`GET /api/telemetry`) for the frontend panel.
+                .configure(telemetry::configure_telemetry)
                 .configure(|cfg| websocket::configure_websocket(cfg, websocket_handler.clone()))
                 .configure(|cfg| {
                     auth_http::configure_auth_routes(cfg, route_handler.clone(), &config)
@@ -209,10 +245,16 @@ async fn main() -> std::io::Result<()> {
                 .app_data(actix_web::web::Data::new(route_handler.clone()))
                 .app_data(actix_web::web::Data::new(config_manager.clone()))
                 .wrap(Governor::new(&governor_conf))
+                // PR8: outermost tracing middleware — see the
+                // advanced-rate-limit branch above for the rationale.
+                .wrap(TracingMiddleware)
                 .wrap(Logger::new(
                     r#"%a "%r" %s %b "%{Referer}i" "%{User-Agent}i" %T"#,
                 ))
                 .wrap(security_headers())
+                // PR8: see the advanced-rate-limit branch above
+                // for the rationale on the `Settings` data.
+                .app_data(actix_web::web::Data::new(config.clone()))
                 // PR5: response compression (gzip / brotli / deflate).
                 // `build` returns None when the config disables compression,
                 // in which case the helper falls back to a no-op DefaultHeaders.
@@ -227,6 +269,9 @@ async fn main() -> std::io::Result<()> {
                 .configure(websocket_admin::configure_admin_websocket)
                 .configure(management::configure_management)
                 .configure(config_reload::configure_config_reload)
+                // PR8: read-only telemetry status endpoint
+                // (`GET /api/telemetry`) for the frontend panel.
+                .configure(telemetry::configure_telemetry)
                 .configure(|cfg| websocket::configure_websocket(cfg, websocket_handler.clone()))
                 .configure(|cfg| {
                     auth_http::configure_auth_routes(cfg, route_handler.clone(), &config)

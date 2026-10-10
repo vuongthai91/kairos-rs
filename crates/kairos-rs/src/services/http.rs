@@ -9,6 +9,9 @@ use crate::services::cache::{
     CacheService,
     should_cache_route,
 };
+use crate::observability::tracing::{
+    extract_context_from_request, inject_context_into_reqwest_headers,
+};
 use crate::services::inflight::{CoalesceOutcome, InFlightTracker};
 use crate::services::load_balancer::{LoadBalancer, LoadBalancerFactory};
 use crate::utils::path::format_route;
@@ -19,6 +22,7 @@ use actix_web::{
     web, Error as ActixError, HttpRequest, HttpResponse,
 };
 use log::{debug, info, warn};
+use tracing::Instrument;
 use reqwest::{
     header::HeaderMap as ReqwestHeaderMap, header::HeaderName, header::HeaderValue, Client,
     Method as ReqwestMethod,
@@ -515,7 +519,15 @@ impl RouteHandler {
         let reqwest_method = self.parse_method(&method);
 
         // Convert headers
-        let reqwest_headers = self.build_headers_optimized(req.headers());
+        let mut reqwest_headers = self.build_headers_optimized(req.headers());
+
+        // PR8: extract W3C Trace Context from incoming request, then
+        // inject it into the upstream reqwest headers so the
+        // upstream service continues the same trace. No-op when
+        // tracing is disabled or no `traceparent` header was sent.
+        if let Some(parent_cx) = extract_context_from_request(req.headers()) {
+            inject_context_into_reqwest_headers(&parent_cx, &mut reqwest_headers);
+        }
 
         // Find matching route using the new pattern matching function
         let (route, transformed_internal_path) =
@@ -801,6 +813,23 @@ impl RouteHandler {
                 .body(body.clone())
                 .headers(reqwest_headers.clone());
 
+            // PR8: instrument the upstream call. The span stays
+            // current for the entire duration of the reqwest future
+            // via `.instrument()`, so any nested `tracing::info!` /
+            // `tracing::error!` (e.g. on retry, on circuit-breaker
+            // failure) becomes a child of this span. When telemetry
+            // is disabled, the span is allocated but the
+            // `tracing-opentelemetry` bridge isn't installed, so it
+            // costs only one `tracing::info_span!` allocation per
+            // request.
+            let upstream_span = tracing::info_span!(
+                "http.upstream",
+                http.url = %target_url,
+                http.method = %reqwest_method.as_str(),
+                http.status_code = tracing::field::Empty,
+                otel.kind = "client",
+            );
+
             // Execute request with timeout and circuit breaker protection
             let result = circuit_breaker
                 .call(async {
@@ -821,11 +850,16 @@ impl RouteHandler {
                         }),
                     }
                 })
+                .instrument(upstream_span.clone())
                 .await;
 
             match result {
                 Ok(response) => {
                     let status_code = response.status().as_u16();
+                    // PR8: stamp the upstream status on the
+                    // `http.upstream` span so it shows up in the
+                    // OTel backend.
+                    upstream_span.record("http.status_code", status_code);
 
                     // Check if we should retry based on status code
                     if let Some(retry_cfg) = &retry_config {
@@ -942,6 +976,8 @@ impl RouteHandler {
                 }
                 Err(CircuitBreakerError::CircuitOpen) => {
                     // Circuit is open, try next backend or fail
+                    // PR8: mark the upstream span as failed.
+                    upstream_span.record("otel.status_code", "ERROR");
                     warn!("Circuit breaker open for {}", service_key);
 
                     if backends.len() > 1 && attempt < max_attempts - 1 {
@@ -956,6 +992,8 @@ impl RouteHandler {
                 }
                 Err(CircuitBreakerError::OperationFailed(gateway_error)) => {
                     // Request failed, record failure
+                    // PR8: mark the upstream span as failed.
+                    upstream_span.record("otel.status_code", "ERROR");
                     if let Some(lb) = self.load_balancers.get(&route.external_path) {
                         lb.record_failure(&backend);
                     }
