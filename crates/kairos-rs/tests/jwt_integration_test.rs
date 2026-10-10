@@ -29,7 +29,8 @@ fn create_test_settings() -> Settings {
         jwt: Some(create_test_jwt_config()),
         rate_limit: None,
         ai: None,
-        routers: vec![
+        telemetry: None,
+            routers: vec![
             // Public route - no authentication required
             Router {
                 host: Some("http://httpbin.org".to_string()),
@@ -194,7 +195,8 @@ async fn test_jwt_config_validation() {
         jwt: None,
         rate_limit: None,
         ai: None,
-        routers: vec![Router {
+        telemetry: None,
+            routers: vec![Router {
             host: Some("http://example.com".to_string()),
             port: Some(80),
             external_path: "/protected".to_string(),
@@ -239,7 +241,8 @@ async fn test_jwt_secret_validation() {
         }),
         rate_limit: None,
         ai: None,
-        routers: vec![Router {
+        telemetry: None,
+            routers: vec![Router {
             host: Some("http://example.com".to_string()),
             port: Some(80),
             external_path: "/protected".to_string(),
@@ -277,7 +280,8 @@ async fn test_jwt_secret_validation() {
         }),
         rate_limit: None,
         ai: None,
-        routers: vec![Router {
+        telemetry: None,
+            routers: vec![Router {
             host: Some("http://example.com".to_string()),
             port: Some(80),
             external_path: "/protected".to_string(),

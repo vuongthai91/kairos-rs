@@ -8,6 +8,7 @@ use kairos_rs::config::settings::load_settings;
 use kairos_rs::models::router::Protocol;
 use kairos_rs::models::router::{Backend, Router};
 use kairos_rs::models::settings::Settings;
+use kairos_rs::observability::tracing::TelemetryConfig;
 use once_cell::sync::Lazy;
 use std::env;
 use std::io::Write;
@@ -22,7 +23,8 @@ fn create_test_settings() -> Settings {
         jwt: None,
         rate_limit: None,
         ai: None,
-        routers: vec![Router {
+        telemetry: None,
+            routers: vec![Router {
             host: Some("http://localhost".to_string()),
             port: Some(3000),
             external_path: "/api/test".to_string(),
@@ -204,7 +206,8 @@ fn test_load_settings_complex_configuration() {
         jwt: None,
         rate_limit: None,
         ai: None,
-        routers: vec![
+        telemetry: None,
+            routers: vec![
             Router {
                 host: Some("https://api.example.com".to_string()),
                 port: Some(443),
@@ -306,7 +309,8 @@ fn test_load_settings_empty_routers() {
         jwt: None,
         rate_limit: None,
         ai: None,
-        routers: vec![],
+        telemetry: None,
+            routers: vec![],
         compression: None,
     };
 
@@ -334,7 +338,8 @@ fn test_load_settings_unicode_content() {
         jwt: None,
         rate_limit: None,
         ai: None,
-        routers: vec![Router {
+        telemetry: None,
+            routers: vec![Router {
             host: Some("https://测试.example.com".to_string()),
             port: Some(443),
             external_path: "/api/用户/{id}".to_string(),
@@ -390,4 +395,54 @@ fn test_load_settings_preserves_current_dir() {
     // Ensure current directory wasn't changed
     let current_dir = env::current_dir().unwrap();
     assert_eq!(original_dir, current_dir);
+}
+
+// PR8 — TelemetryConfig validation surface.
+//
+// These tests exercise the three `TelemetryConfig::validate()` rules from
+// `crates/kairos-rs/src/observability/tracing.rs`. The in-file `#[cfg(test)]`
+// block in that module covers the happy path; these integration tests pin the
+// failure modes so a future refactor can't silently break them.
+
+#[test]
+fn telemetry_config_rejects_out_of_range_sample_ratio() {
+    let mut cfg = TelemetryConfig::default();
+    cfg.sample_ratio = 1.5;
+    assert!(cfg.validate().is_err(), "sample_ratio > 1.0 must fail");
+    cfg.sample_ratio = -0.1;
+    assert!(cfg.validate().is_err(), "negative sample_ratio must fail");
+    cfg.sample_ratio = f64::NAN;
+    assert!(cfg.validate().is_err(), "NaN sample_ratio must fail");
+    cfg.sample_ratio = 0.0;
+    assert!(cfg.validate().is_ok(), "0.0 (drop everything) is valid");
+    cfg.sample_ratio = 1.0;
+    assert!(cfg.validate().is_ok(), "1.0 (always on) is valid");
+}
+
+#[test]
+fn telemetry_config_rejects_empty_service_name() {
+    let mut cfg = TelemetryConfig::default();
+    cfg.service_name = "   ".to_string();
+    assert!(cfg.validate().is_err(), "whitespace-only service_name must fail");
+    cfg.service_name = String::new();
+    assert!(cfg.validate().is_err(), "empty service_name must fail");
+    cfg.service_name = "kairos-gateway".to_string();
+    assert!(cfg.validate().is_ok());
+}
+
+#[test]
+fn telemetry_config_requires_endpoint_when_enabled() {
+    let mut cfg = TelemetryConfig::default();
+    cfg.enabled = true;
+    cfg.otlp_endpoint = None;
+    assert!(
+        cfg.validate().is_err(),
+        "enabled=true without otlp_endpoint must fail"
+    );
+    cfg.otlp_endpoint = Some("http://otel-collector:4317".to_string());
+    assert!(cfg.validate().is_ok());
+    // disabled with no endpoint is the default and must be valid
+    cfg.enabled = false;
+    cfg.otlp_endpoint = None;
+    assert!(cfg.validate().is_ok());
 }

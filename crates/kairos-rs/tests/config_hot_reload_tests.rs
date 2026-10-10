@@ -17,7 +17,8 @@ fn create_test_settings() -> Settings {
         jwt: None,
         rate_limit: None,
         ai: None,
-        routers: vec![Router {
+        telemetry: None,
+            routers: vec![Router {
             host: Some("http://localhost".to_string()),
             port: Some(3000),
             external_path: "/test".to_string(),

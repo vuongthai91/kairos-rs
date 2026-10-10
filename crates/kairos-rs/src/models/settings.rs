@@ -1,6 +1,7 @@
 use crate::middleware::compression::CompressionConfig;
 use crate::middleware::rate_limit::RateLimitConfig;
 use crate::models::router::Router;
+use crate::observability::tracing::TelemetryConfig;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for AI capabilities.
@@ -144,6 +145,16 @@ pub struct Settings {
     /// or `enabled = false`, the gateway serves uncompressed responses.
     #[serde(default)]
     pub compression: Option<CompressionConfig>,
+
+    /// OpenTelemetry distributed tracing configuration (PR8).
+    ///
+    /// When present and `enabled = true` with a valid `otlp_endpoint`,
+    /// the gateway installs a global tracer provider and emits
+    /// W3C Trace Context `traceparent` headers + root/child spans
+    /// for every request. When absent or `enabled = false`, all
+    /// tracing helpers short-circuit to no-ops with zero overhead.
+    #[serde(default)]
+    pub telemetry: Option<TelemetryConfig>,
 
     /// Collection of route configurations defining how requests are forwarded.
     ///

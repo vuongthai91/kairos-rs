@@ -40,7 +40,8 @@ fn test_empty_configuration() {
         rate_limit: None,
         ai: None,
         version: 1,
-        routers: vec![],
+        telemetry: None,
+            routers: vec![],
         compression: None,
     };
 
@@ -59,7 +60,8 @@ fn test_security_warnings() {
         rate_limit: None,
         ai: None,
         version: 1,
-        routers: vec![create_test_router(
+        telemetry: None,
+            routers: vec![create_test_router(
             "http://example.com",
             "/api/test",
             vec!["GET"],
@@ -81,7 +83,8 @@ fn test_performance_warnings() {
         rate_limit: None,
         ai: None,
         version: 1,
-        routers: vec![create_test_router(
+        telemetry: None,
+            routers: vec![create_test_router(
             "https://example.com",
             "/api/{a}/{b}/{c}/{d}",
             vec!["GET"],
@@ -142,7 +145,8 @@ fn test_localhost_http_warnings() {
         rate_limit: None,
         ai: None,
         version: 1,
-        routers: vec![
+        telemetry: None,
+            routers: vec![
             create_test_router("http://localhost:3000", "/api/test", vec!["GET"]),
             create_test_router("http://127.0.0.1:8080", "/api/local", vec!["POST"]),
         ],
@@ -160,7 +164,8 @@ fn test_overly_permissive_methods() {
         rate_limit: None,
         ai: None,
         version: 1,
-        routers: vec![create_test_router(
+        telemetry: None,
+            routers: vec![create_test_router(
             "https://example.com",
             "/api/test",
             vec!["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"],
@@ -182,7 +187,8 @@ fn test_path_traversal_detection() {
         rate_limit: None,
         ai: None,
         version: 1,
-        routers: vec![Router {
+        telemetry: None,
+            routers: vec![Router {
             host: Some("https://example.com".to_string()),
             port: Some(443),
             external_path: "/api/../admin".to_string(),
@@ -221,7 +227,8 @@ fn test_duplicate_route_paths() {
         rate_limit: None,
         ai: None,
         version: 1,
-        routers: vec![
+        telemetry: None,
+            routers: vec![
             create_test_router("https://example.com", "/api/test", vec!["GET"]),
             create_test_router("https://other.com", "/api/test", vec!["POST"]),
         ],
@@ -243,7 +250,8 @@ fn test_mixed_http_https_warnings() {
         rate_limit: None,
         ai: None,
         version: 1,
-        routers: vec![
+        telemetry: None,
+            routers: vec![
             create_test_router("http://example.com", "/api/insecure", vec!["GET"]),
             create_test_router("https://secure.com", "/api/secure", vec!["GET"]),
         ],
@@ -269,7 +277,8 @@ fn test_all_http_routes_warning() {
         rate_limit: None,
         ai: None,
         version: 1,
-        routers: vec![
+        telemetry: None,
+            routers: vec![
             create_test_router("http://example1.com", "/api/test1", vec!["GET"]),
             create_test_router("http://example2.com", "/api/test2", vec!["POST"]),
         ],
@@ -301,6 +310,7 @@ fn test_high_dynamic_routes_warning() {
         version: 1,
         routers,
         compression: None,
+        telemetry: None,
     };
 
     let result = ConfigValidator::validate_comprehensive(&settings);
@@ -317,7 +327,8 @@ fn test_static_route_recommendation() {
         rate_limit: None,
         ai: None,
         version: 1,
-        routers: vec![
+        telemetry: None,
+            routers: vec![
             create_test_router("https://example.com", "/api/{id}", vec!["GET"]),
             create_test_router("https://example.com", "/api/{user_id}/profile", vec!["GET"]),
         ],
@@ -338,7 +349,8 @@ fn test_valid_configuration() {
         rate_limit: None,
         ai: None,
         version: 1,
-        routers: vec![
+        telemetry: None,
+            routers: vec![
             create_test_router("https://example.com", "/api/health", vec!["GET"]),
             create_test_router("https://example.com", "/api/users/{id}", vec!["GET", "PUT"]),
         ],

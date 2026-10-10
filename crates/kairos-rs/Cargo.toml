@@ -38,6 +38,12 @@ rand.workspace = true
 # Caching
 moka.workspace = true
 bytes.workspace = true
+opentelemetry.workspace = true
+opentelemetry_sdk.workspace = true
+opentelemetry-otlp.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-opentelemetry.workspace = true
 
 # Protocol-specific dependencies
 tokio-tungstenite = { version = "0.21" }

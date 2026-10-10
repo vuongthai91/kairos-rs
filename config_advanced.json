@@ -15,6 +15,13 @@
     "enable_redis": false,
     "redis_key_prefix": "kairos_rl"
   },
+  "telemetry": {
+    "_comment": "PR8 — OpenTelemetry distributed tracing. Set enabled=true and point otlp_endpoint at a real collector (e.g. otel-collector:4317) to start exporting spans. When enabled=false the gateway runs with zero tracing overhead.",
+    "enabled": false,
+    "service_name": "kairos-gateway",
+    "otlp_endpoint": "http://otel-collector:4317",
+    "sample_ratio": 1.0
+  },
   "routers": [
     {
       "_comment": "Legacy single backend configuration (backward compatible)",
