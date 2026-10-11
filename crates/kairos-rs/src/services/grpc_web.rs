@@ -222,11 +222,20 @@ pub async fn grpc_web_catch_all(
 
     match forward_streaming(&state.service, backend, upstream_request).await {
         Ok(response) => {
-            // Collect the response body via the
-            // `http_body::Body` trait (the tonic
-            // `BoxBody` type doesn't implement actix's
-            // `MessageBody`, so we can't use
-            // `actix_web::body::to_bytes`).
+            // Per the gRPC-Web spec
+            // (https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md):
+            // - Binary (`application/grpc-web+proto`): the response
+            //   body is the RAW concatenation of gRPC frames
+            //   (1-byte type + 4-byte BE length + payload). The
+            //   tonic response body already contains these frames
+            //   (data + trailers), so we pass it through as-is.
+            // - Text (`application/grpc-web-text`): the entire
+            //   body is base64-encoded.
+            //
+            // v1 was incorrectly base64-encoding the binary
+            // response body, which produced a body that the
+            // gRPC-Web client couldn't parse (it expected raw
+            // frames, not base64). This is the fix.
             let collected = match http_body_util::BodyExt::collect(response.into_body()).await {
                 Ok(c) => c.to_bytes(),
                 Err(e) => {
@@ -237,11 +246,14 @@ pub async fn grpc_web_catch_all(
                         .body(grpc_web_error_frame(14, "upstream body error")));
                 }
             };
-            let encoded = STANDARD.encode(&collected);
+            // Pass through the raw gRPC wire format. No base64
+            // encoding for binary gRPC-Web. The tonic response
+            // body already has the correct 5-byte frame headers
+            // for both data frames and the trailers frame.
             Ok(HttpResponse::Ok()
                 .insert_header((GRPC_WEB_HEADER, "1"))
                 .content_type("application/grpc-web+proto")
-                .body(encoded))
+                .body(collected))
         }
         Err(crate::services::grpc::GrpcError::Timeout) => Ok(HttpResponse::GatewayTimeout()
             .insert_header((GRPC_WEB_HEADER, "1"))

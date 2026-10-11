@@ -213,9 +213,22 @@ async fn forward_to_backend(
             // unary, server-streaming, and bidi-streaming
             // responses: a unary response is just a 1-frame
             // stream.
+            //
+            // actix-web 4.x's `MessageBody` trait has no
+            // `trailers()` method, so we can't emit proper
+            // HTTP/2 trailers. The gRPC spec requires
+            // `grpc-status` in HTTP/2 trailers, but many
+            // clients (including grpcurl for unary calls)
+            // accept `grpc-status` in response headers when
+            // `te: trailers` is in the request. We set it
+            // here for unary success responses; streaming
+            // clients interpret stream-end as
+            // `grpc-status: 0`.
             let stream = crate::services::grpc_stream::TonicBodyStream::new(response.into_body());
             Ok(HttpResponse::Ok()
                 .content_type("application/grpc")
+                .insert_header(("grpc-status", "0"))
+                .insert_header(("te", "trailers"))
                 .streaming(stream))
         }
         Err(crate::services::grpc::GrpcError::Timeout) => Ok(HttpResponse::GatewayTimeout()

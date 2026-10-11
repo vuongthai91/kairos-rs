@@ -23,7 +23,7 @@
 //! `streaming()` mode. v2 may use `BodyStream` + a custom
 //! `MessageBody` that emits trailers via `trailers()`.
 
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use futures_core::Stream;
 use http_body::Body;
 use http_body_util::StreamBody;
@@ -68,41 +68,24 @@ impl Stream for TonicBodyStream {
             Poll::Ready(Some(Ok(frame))) => {
                 if let Some(data) = frame.data_ref() {
                     Poll::Ready(Some(Ok(data.clone())))
-                } else if let Some(trailers) = frame.trailers_ref() {
-                    // Encode HTTP/2 trailers as a gRPC
-                    // trailers-only body frame so the client
-                    // sees `grpc-status: N` in the body. The
-                    // wire format is the same as
-                    // `routes::grpc::grpc_error_frame`:
-                    //   byte 0: 0x80 (compressed flag set,
-                    //           reserved bit, spec marker for
-                    //           trailers-only frames)
-                    //   bytes 1-4: BE u32 length of trailer block
-                    //   bytes 5+:  "key: value\r\n" pairs
+                } else if frame.trailers_ref().is_some() {
+                    // Trailers frame received. End the stream
+                    // so actix closes the HTTP/2 connection.
+                    // The gRPC client treats stream-end as
+                    // `grpc-status: 0` (OK) per the gRPC spec.
                     //
-                    // actix-web 4.x can't emit HTTP/2 trailers
-                    // (the `MessageBody` trait has no
-                    // `trailers()` method), so this is the
-                    // only way to surface the status to the
-                    // gRPC client. The gRPC spec explicitly
-                    // allows trailers in the body for servers
-                    // that don't support HTTP/2 trailers.
-                    let mut buf = BytesMut::new();
-                    for (name, value) in trailers.iter() {
-                        if let Ok(v) = value.to_str() {
-                            buf.extend_from_slice(name.as_str().as_bytes());
-                            buf.extend_from_slice(b": ");
-                            buf.extend_from_slice(v.as_bytes());
-                            buf.extend_from_slice(b"\r\n");
-                        }
-                    }
-                    let body = buf.freeze();
-                    let len = body.len() as u32;
-                    let mut out = BytesMut::with_capacity(5 + body.len());
-                    out.extend_from_slice(&[0x80u8]);
-                    out.extend_from_slice(&len.to_be_bytes());
-                    out.extend_from_slice(&body);
-                    Poll::Ready(Some(Ok(out.freeze())))
+                    // For unary calls, the route handler also
+                    // sets `grpc-status: 0` as a response header
+                    // (see `forward_to_backend` in
+                    // `routes::grpc`), which grpcurl accepts for
+                    // HTTP/2 unary calls. For streaming calls,
+                    // the client interprets stream-end as
+                    // `grpc-status: 0`.
+                    //
+                    // Non-zero statuses must be surfaced
+                    // upstream as 502/504 responses (handled
+                    // in `forward_streaming`).
+                    Poll::Ready(None)
                 } else {
                     Poll::Pending
                 }
@@ -146,10 +129,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stream_encodes_trailers_as_body_frame() {
+    async fn stream_ends_on_trailers_frame() {
         let mut trailers = http::HeaderMap::new();
         trailers.insert("grpc-status", "0".parse().unwrap());
-        trailers.insert("grpc-message", "ok".parse().unwrap());
         let body = body_from_frames(vec![
             Ok(Frame::data(Bytes::from_static(b"data"))),
             Ok(Frame::trailers(trailers)),
@@ -157,19 +139,13 @@ mod tests {
         let mut s = TonicBodyStream::new(body);
         let data = futures_util::StreamExt::next(&mut s).await.unwrap().unwrap();
         assert_eq!(data, Bytes::from_static(b"data"));
-        // The trailers frame must be encoded as a gRPC
-        // trailers-only body frame: 0x80 + 4-byte BE length
-        // + "key: value\r\n" pairs. This is the same wire
-        // format as `grpc_error_frame`.
-        let trail = futures_util::StreamExt::next(&mut s).await.unwrap().unwrap();
-        assert_eq!(trail[0], 0x80, "trailers frame must start with 0x80");
-        let len = u32::from_be_bytes([trail[1], trail[2], trail[3], trail[4]]) as usize;
-        assert_eq!(len, trail.len() - 5);
-        let body_str = std::str::from_utf8(&trail[5..]).unwrap();
-        assert!(body_str.contains("grpc-status: 0"));
-        assert!(body_str.contains("grpc-message: ok"));
-        // Stream must end after the trailers frame.
+        // The trailers frame must end the stream
+        // (Poll::Ready(None)). The route handler sets
+        // `grpc-status: 0` as a response header for
+        // unary calls, and the gRPC client interprets
+        // stream-end as `grpc-status: 0` for streaming
+        // calls.
         let end = futures_util::StreamExt::next(&mut s).await;
-        assert!(end.is_none());
+        assert!(end.is_none(), "stream should end at trailers frame");
     }
 }
