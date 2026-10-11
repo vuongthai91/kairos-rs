@@ -16,6 +16,7 @@ use kairos_rs::models::settings::Settings;
 use kairos_rs::observability::middleware::TracingMiddleware;
 use kairos_rs::observability::tracing as obs_tracing;
 use kairos_rs::routes::{auth_http, config_reload, grpc, health, management, metrics, telemetry, websocket, websocket_admin};
+use kairos_rs::services::grpc_web;
 use kairos_rs::services::http::RouteHandler;
 use kairos_rs::services::grpc::GrpcService;
 use kairos_rs::services::metrics_store::MetricsStore;
@@ -239,6 +240,12 @@ async fn main() -> std::io::Result<()> {
                     std::sync::Arc::new(config.routers.clone()),
                 )))
                 .configure(grpc::configure_grpc)
+                // PR9 v2 part 6: gRPC-Web adapter for
+                // browser clients. Same GrpcState as
+                // the native handler; the adapter
+                // base64-decodes the request body and
+                // base64-encodes the response.
+                .configure(grpc_web::configure_grpc_web)
                 .configure(|cfg| websocket::configure_websocket(cfg, websocket_handler.clone()))
                 .configure(|cfg| {
                     auth_http::configure_auth_routes(cfg, route_handler.clone(), &config)
@@ -297,6 +304,12 @@ async fn main() -> std::io::Result<()> {
                     std::sync::Arc::new(config.routers.clone()),
                 )))
                 .configure(grpc::configure_grpc)
+                // PR9 v2 part 6: gRPC-Web adapter for
+                // browser clients. Same GrpcState as
+                // the native handler; the adapter
+                // base64-decodes the request body and
+                // base64-encodes the response.
+                .configure(grpc_web::configure_grpc_web)
                 .configure(|cfg| websocket::configure_websocket(cfg, websocket_handler.clone()))
                 .configure(|cfg| {
                     auth_http::configure_auth_routes(cfg, route_handler.clone(), &config)

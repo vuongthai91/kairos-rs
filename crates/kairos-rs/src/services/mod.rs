@@ -87,6 +87,7 @@ pub mod grpc;
 pub mod grpc_frame;
 pub mod grpc_pool;
 pub mod grpc_stream;
+pub mod grpc_web;
 pub mod http;
 pub mod inflight;
 pub mod load_balancer;

@@ -265,7 +265,7 @@ fn first_grpc_backend_index(routers: &[Router]) -> Option<usize> {
 /// skip the trailing metadata-Map step and just emit the status;
 /// clients should fall back to HTTP status code for the failure
 /// reason.
-fn grpc_error_frame(status: i32, message: &str) -> Vec<u8> {
+pub(crate) fn grpc_error_frame(status: i32, message: &str) -> Vec<u8> {
     let body = format!("grpc-status: {}\r\ngrpc-message: {}\r\n", status, message);
     let len = body.len() as u32;
     let mut out = Vec::with_capacity(5 + body.len());
