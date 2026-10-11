@@ -27,15 +27,13 @@
 use actix_web::guard::{Guard, GuardContext};
 use actix_web::http::header;
 use actix_web::{web, Error as ActixError, HttpRequest, HttpResponse};
-use bytes::BytesMut;
 use futures_util::StreamExt;
+use http_body::Frame;
+use http_body_util::StreamBody;
 use log::{debug, warn};
 
 use crate::models::router::Router;
-use crate::services::grpc::{
-    build_request, find_route, forward_unary, GrpcService,
-};
-use crate::services::grpc_frame::MAX_GRPC_PAYLOAD;
+use crate::services::grpc::{find_route, forward_streaming, GrpcService};
 use crate::services::grpc_frame::is_grpc_content_type;
 
 /// `web::Data` wrapper for the gRPC dispatcher. Holds the
@@ -104,31 +102,71 @@ pub async fn grpc_catch_all(
         }
     };
 
-    // Accumulate the body into a single Bytes (unary only in v1).
-    let mut buf = BytesMut::new();
-    let mut stream = body;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(actix_web::error::ErrorBadRequest)?;
-        if buf.len() + chunk.len() > MAX_GRPC_PAYLOAD {
-            return Ok(HttpResponse::PayloadTooLarge()
-                .content_type("application/grpc")
-                .body(grpc_error_frame(8, "payload too large")));
-        }
-        buf.extend_from_slice(&chunk);
-    }
-    let body = buf.freeze();
-
-    // Build the upstream request, preserving the inbound content
-    // type so the backend can choose the right deserializer.
+    // Build the upstream request URI, preserving the inbound
+    // content type so the backend can choose the right
+    // deserializer. The body is consumed lazily: we wrap the
+    // actix `web::Payload` (a Stream of Result<Bytes>) in an
+    // `http_body::Body` adapter and hand it to the dispatcher
+    // without buffering. This is what makes client-streaming
+    // and bidi-streaming calls work — tonic's `BoxBody`
+    // implements `http_body::Body`, and the dispatcher can
+    // read frames as the backend polls them.
     let content_type = req
         .headers()
         .get(actix_web::http::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    let request = build_request(&path, body, content_type.as_deref());
+    let uri: http::Uri = path
+        .parse()
+        .unwrap_or_else(|_| "/".parse().expect("static uri"));
+    let mut builder = http::Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("te", "trailers");
+    if let Some(ref ct) = content_type {
+        builder = builder.header("content-type", ct);
+    }
 
-    match forward_unary(&state.service, backend, request).await {
+    // Build a streaming body from the actix payload. The
+    // adapter maps `PayloadError` → `tonic::Status` so tonic
+    // can frame them. actix's `web::Payload` is `!Send`
+    // (it uses `Rc` internally), so we can't hand it to
+    // tonic directly. Instead, spawn a task on the current
+    // actix worker that drains the payload into a
+    // tokio::sync::mpsc channel; the receiver (which IS
+    // Send) is wrapped in a `StreamBody` and handed to
+    // tonic. The body is consumed lazily — no pre-buffering.
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Frame<bytes::Bytes>, tonic::Status>>(8);
+    actix_web::rt::spawn(async move {
+        let mut stream = body;
+        while let Some(item) = stream.next().await {
+            let frame = match item {
+                Ok(bytes) => Ok(Frame::data(bytes)),
+                Err(e) => Err(tonic::Status::internal(format!("upstream read error: {}", e))),
+            };
+            if tx.send(frame).await.is_err() {
+                break;
+            }
+        }
+    });
+    let body: tonic::body::BoxBody = tonic::body::BoxBody::new(StreamBody::new(
+        futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|item| (item, rx))
+        }),
+    ));
+
+    let request = match builder.body(body) {
+        Ok(r) => r,
+        Err(e) => {
+            warn!("failed to build gRPC request: {}", e);
+            return Ok(HttpResponse::InternalServerError()
+                .content_type("application/grpc")
+                .body(grpc_error_frame(13, "request build failed")));
+        }
+    };
+
+    match forward_streaming(&state.service, backend, request).await {
         Ok(response) => {
             // Stream the response body. actix's `streaming()`
             // accepts a `Stream<Item = Result<Bytes, E>>` and

@@ -30,7 +30,6 @@
 //! connection pool) but works for typical gRPC workloads.
 
 use bytes::Bytes;
-use futures_util::FutureExt;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use log::{debug, error};
@@ -131,37 +130,32 @@ fn backend_uri(backend: &Backend) -> Result<http::Uri, GrpcError> {
         })
 }
 
-/// Forward `body` (a unary gRPC request body) to the backend channel
-/// and return the response. The response body is also expected to
-/// be a unary frame; streaming responses are NOT supported in v1
-/// (the caller should check `is_unary_endpoint` before calling).
-pub async fn forward_unary(
+/// Forward a streaming gRPC request body to the backend channel
+/// and return the response. The request body is consumed
+/// lazily (no pre-buffering) so this function handles all 4
+/// gRPC call types:
+/// - **Unary**: request body is 1 frame
+/// - **Server-streaming**: request body is 1 frame, response is N
+/// - **Client-streaming**: request body is N frames
+/// - **Bidi-streaming**: both sides are N frames
+///
+/// The response body is always returned as a `tonic::BoxBody`,
+/// which is itself an `http_body::Body` of frames — the
+/// caller is responsible for streaming it to the wire
+/// (the route handler does this via `TonicBodyStream`).
+pub async fn forward_streaming(
     service: &GrpcService,
     backend: &Backend,
-    request: http::Request<Full<Bytes>>,
+    request: http::Request<BoxBody>,
 ) -> Result<http::Response<BoxBody>, GrpcError> {
     let channel = service.channel_for(backend)?;
     debug!(
-        "grpc forward_unary: backend={}:{} path={}",
+        "grpc forward_streaming: backend={}:{} path={}",
         backend.host,
         backend.port,
         request.uri().path()
     );
-    let (parts, body) = request.into_parts();
-    // tonic::transport::Channel implements Service<http::Request<BoxBody>>,
-    // not Service<http::Request<Full<Bytes>>>. Map the Full<Bytes> error
-    // type (Infallible) into tonic::Status so the wrap is total.
-    let body: BoxBody = BoxBody::new(body.map_err(|_| unreachable!("Full<Bytes> error is Infallible")));
-    let request = http::Request::from_parts(parts, body);
-    // Wrap the channel in a tower::Buffer so `.call()` is safe
-    // to drive directly without manual poll_ready ceremony.
-    // The buffer holds one in-flight request, which is enough
-    // for v1 (one actix request = one tonic call).
     let mut svc = tower::ServiceBuilder::new().buffer(1).service(channel);
-    // `poll_ready` reserves a permit in the buffer; without it
-    // `call()` would panic. `Service::ready()` returns a
-    // `Ready<Self, Request>` future that drives poll_ready and
-    // self-references into the service.
     let _ready = svc.ready().await.map_err(|e| {
         error!("grpc not ready: {}", e);
         GrpcError::Buffer(format!("ready: {}", e))
@@ -172,9 +166,6 @@ pub async fn forward_unary(
             error!("grpc call timed out after {:?}", service.timeout);
             GrpcError::Timeout
         })?;
-    // The buffer's error type is `Box<dyn StdError + Send + Sync>`,
-    // not the inner service's error. Downcast to recover the
-    // tonic transport error when possible.
     let response = response.map_err(|e| {
         match e.downcast::<tonic::transport::Error>() {
             Ok(te) => map_transport_err(*te),
@@ -185,6 +176,23 @@ pub async fn forward_unary(
         }
     })?;
     Ok(response)
+}
+
+/// Unary-only convenience wrapper. Builds a `Full<Bytes>`
+/// body from `body` and dispatches via
+/// [`forward_streaming`]. Use this when you know the request
+/// fits in memory (the common case for unary RPCs); for
+/// streaming RPCs build a `BoxBody` from a stream and call
+/// `forward_streaming` directly.
+pub async fn forward_unary(
+    service: &GrpcService,
+    backend: &Backend,
+    request: http::Request<Full<Bytes>>,
+) -> Result<http::Response<BoxBody>, GrpcError> {
+    let (parts, body) = request.into_parts();
+    let body: BoxBody = BoxBody::new(body.map_err(|_| unreachable!("Full<Bytes> error is Infallible")));
+    let request = http::Request::from_parts(parts, body);
+    forward_streaming(service, backend, request).await
 }
 
 /// `hyper::body::Incoming` is what actix-web hands us for the
