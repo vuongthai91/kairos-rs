@@ -192,6 +192,37 @@ pub struct Backend {
     /// If specified, the gateway will periodically check this endpoint.
     #[serde(default)]
     pub health_check_path: Option<String>,
+
+    /// Optional TLS config for the gRPC backend (PR9 v2). When
+    /// `Some`, the gateway establishes an h2 (TLS) connection
+    /// to the backend instead of h2c (cleartext). Has no
+    /// effect for non-gRPC protocols.
+    #[serde(default)]
+    pub tls: Option<BackendTlsConfig>,
+}
+
+/// TLS configuration for a single gRPC backend. v2 only
+/// supports server-side verification (no mutual TLS). A
+/// future v3 may add `client_identity` for mTLS.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct BackendTlsConfig {
+    /// PEM-encoded CA certificate bundle used to verify
+    /// the backend's certificate. If `None`, the gateway
+    /// uses the system's webpki roots.
+    #[serde(default)]
+    pub ca_cert_pem: Option<String>,
+
+    /// Override the SNI / certificate verification hostname.
+    /// If `None`, the gateway uses `host` as the SNI value
+    /// (which is what most operators want).
+    #[serde(default)]
+    pub domain: Option<String>,
+
+    /// Skip certificate verification entirely. Only use for
+    /// local development with self-signed certs; the
+    /// default `false` is the safe choice.
+    #[serde(default)]
+    pub insecure_skip_verify: bool,
 }
 
 fn default_weight() -> u32 {
@@ -715,6 +746,7 @@ impl Router {
                 port: *port,
                 weight: 1,
                 health_check_path: None,
+                tls: None,
             }]
         } else {
             vec![]

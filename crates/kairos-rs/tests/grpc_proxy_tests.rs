@@ -33,6 +33,7 @@ fn router_with_backend(backend_host: &str, backend_port: u16) -> Router {
             port: backend_port,
             weight: 1,
             health_check_path: None,
+            tls: None,
         }]),
         load_balancing_strategy: LoadBalancingStrategy::RoundRobin,
         retry: None,

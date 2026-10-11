@@ -14,6 +14,7 @@ fn test_backend_validation() {
         port: 8080,
         weight: 1,
         health_check_path: Some("/health".to_string()),
+        tls: None,
     };
     assert!(valid_backend.validate().is_ok());
 
@@ -22,6 +23,7 @@ fn test_backend_validation() {
         port: 8080,
         weight: 1,
         health_check_path: None,
+        tls: None,
     };
     assert!(invalid_host_backend.validate().is_err());
 
@@ -30,6 +32,7 @@ fn test_backend_validation() {
         port: 0,
         weight: 1,
         health_check_path: None,
+        tls: None,
     };
     assert!(zero_port_backend.validate().is_err());
 
@@ -38,6 +41,7 @@ fn test_backend_validation() {
         port: 8080,
         weight: 0,
         health_check_path: None,
+        tls: None,
     };
     assert!(zero_weight_backend.validate().is_err());
 }
@@ -53,12 +57,14 @@ fn test_router_with_backends() {
                 port: 8080,
                 weight: 1,
                 health_check_path: Some("/health".to_string()),
+                tls: None,
             },
             Backend {
                 host: "http://backend-2".to_string(),
                 port: 8080,
                 weight: 2,
                 health_check_path: Some("/health".to_string()),
+                tls: None,
             },
         ]),
         load_balancing_strategy: LoadBalancingStrategy::Weighted,
@@ -134,18 +140,21 @@ fn test_round_robin_balancer() {
             port: 8080,
             weight: 1,
             health_check_path: None,
+            tls: None,
         },
         Backend {
             host: "http://backend-2".to_string(),
             port: 8080,
             weight: 1,
             health_check_path: None,
+            tls: None,
         },
         Backend {
             host: "http://backend-3".to_string(),
             port: 8080,
             weight: 1,
             health_check_path: None,
+            tls: None,
         },
     ];
 
@@ -166,12 +175,14 @@ fn test_weighted_balancer() {
             port: 8080,
             weight: 2,
             health_check_path: None,
+            tls: None,
         },
         Backend {
             host: "http://backend-2".to_string(),
             port: 8080,
             weight: 1,
             health_check_path: None,
+            tls: None,
         },
     ];
 
@@ -251,6 +262,7 @@ fn create_test_backends(count: usize) -> Vec<Backend> {
             port: 8080,
             weight: 1,
             health_check_path: None,
+            tls: None,
         })
         .collect()
 }

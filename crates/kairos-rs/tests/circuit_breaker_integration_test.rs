@@ -22,6 +22,7 @@ async fn test_circuit_breaker_integration() {
                     port: 9999,
                     weight: 1,
                     health_check_path: None,
+                    tls: None,
                 }
             ]),
             load_balancing_strategy: Default::default(),
@@ -108,6 +109,7 @@ async fn test_multiple_service_circuit_breakers() {
                     port: 8001,
                     weight: 1,
                     health_check_path: None,
+                    tls: None,
                 }
             ]),
             load_balancing_strategy: Default::default(),
@@ -131,6 +133,7 @@ async fn test_multiple_service_circuit_breakers() {
                     port: 8002,
                     weight: 1,
                     health_check_path: None,
+                    tls: None,
                 }
             ]),
             load_balancing_strategy: Default::default(),

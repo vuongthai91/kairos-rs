@@ -190,6 +190,7 @@ mod tests {
             port: 443,
             weight: 1,
             health_check_path: None,
+                tls: None,
         };
         let key = BackendKey::from_backend(&backend);
         assert_eq!(key.host, "api.example.com");

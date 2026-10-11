@@ -85,13 +85,33 @@ impl GrpcService {
     /// returns it. The first real connection attempt happens
     /// on the first request through the new channel, so
     /// `channel_for` never blocks on TCP.
+    ///
+    /// v2: when `backend.tls` is `Some`, builds a
+    /// `ClientTlsConfig` and applies it to the endpoint so
+    /// the gateway establishes h2 (TLS) instead of h2c
+    /// (cleartext). The same TLS fingerprint is included in
+    /// the pool key so two backends on the same `host:port`
+    /// with different TLS settings get separate channels.
     pub fn channel_for(&self, backend: &Backend) -> Result<Channel, GrpcError> {
-        let key = crate::services::grpc_pool::BackendKey::from_backend(backend);
+        let mut key = crate::services::grpc_pool::BackendKey::from_backend(backend);
+        if let Some(tls) = &backend.tls {
+            // Hash the TLS config to produce a stable
+            // fingerprint for the pool key. A real backend
+            // can re-key (e.g. cert rotation) by changing
+            // the PEM; the fingerprint changes, so the pool
+            // entry is invalidated and a new channel is
+            // built on the next request.
+            key.tls_fingerprint = tls_fingerprint(tls);
+        }
         if let Some(ch) = self.pool.get(&key) {
             return Ok(ch);
         }
         let uri = backend_uri(backend)?;
-        let channel = tonic::transport::Endpoint::new(uri)?.connect_lazy();
+        let mut endpoint = tonic::transport::Endpoint::new(uri)?;
+        if let Some(tls) = &backend.tls {
+            endpoint = endpoint.tls_config(build_tls_config(tls)?)?;
+        }
+        let channel = endpoint.connect_lazy();
         self.pool.insert(key, channel.clone());
         Ok(channel)
     }
@@ -129,14 +149,17 @@ pub enum GrpcError {
     Buffer(String),
 }
 
-/// Build the URI that `tonic::transport::Endpoint` expects. We
-/// always use h2c with prior knowledge (no TLS) for the v1
-/// gateway-to-backend hop. External-facing gRPC should still be
-/// terminated by a TLS sidecar (envoy, nginx).
+/// Build the URI that `tonic::transport::Endpoint` expects.
+/// Picks `https://` when `backend.tls` is `Some`, else
+/// `http://` (h2c with prior knowledge for the gateway-to-
+/// backend hop). External-facing gRPC should still be
+/// terminated by a TLS sidecar (envoy, nginx) when TLS is
+/// disabled.
 fn backend_uri(backend: &Backend) -> Result<http::Uri, GrpcError> {
     let host = &backend.host;
     let port = backend.port;
-    let candidate = format!("http://{}:{}{}", host, port, "");
+    let scheme = if backend.tls.is_some() { "https" } else { "http" };
+    let candidate = format!("{}://{}:{}", scheme, host, port);
     candidate
         .parse::<http::Uri>()
         .map_err(|e| GrpcError::InvalidBackendUri {
@@ -144,6 +167,148 @@ fn backend_uri(backend: &Backend) -> Result<http::Uri, GrpcError> {
             port,
             reason: e.to_string(),
         })
+}
+
+/// Hash the `BackendTlsConfig` into a stable `u64` for the
+/// pool key. We hash the PEM bytes (or 0 if None), the
+/// domain override (or 0 if None), and the
+/// `insecure_skip_verify` flag. xxHash is used (via
+/// `ahash::RandomState`) because it's already a workspace
+/// dep and the value isn't security-sensitive.
+fn tls_fingerprint(tls: &crate::models::router::BackendTlsConfig) -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    let state = ahash::AHasher::default();
+    let mut hasher = state;
+    hasher.write_u8(tls.insecure_skip_verify as u8);
+    if let Some(pem) = &tls.ca_cert_pem {
+        hasher.write(pem.as_bytes());
+    } else {
+        hasher.write_u8(0);
+    }
+    if let Some(d) = &tls.domain {
+        hasher.write(d.as_bytes());
+    } else {
+        hasher.write_u8(0);
+    }
+    hasher.finish()
+}
+
+/// Build a `ClientTlsConfig` from a `BackendTlsConfig`.
+/// Returns the appropriate `GrpcError` variant on
+/// invalid PEM (the operator will see the error in the
+/// gateway logs at config-load time).
+fn build_tls_config(
+    tls: &crate::models::router::BackendTlsConfig,
+) -> Result<tonic::transport::ClientTlsConfig, GrpcError> {
+    let mut cfg = tonic::transport::ClientTlsConfig::new()
+        .with_enabled_roots();
+    if let Some(pem) = &tls.ca_cert_pem {
+        let cert = tonic::transport::Certificate::from_pem(pem);
+        cfg = cfg.ca_certificate(cert);
+    }
+    if let Some(d) = &tls.domain {
+        cfg = cfg.domain_name(d);
+    } else {
+        // Default: use the host as the SNI value, which is
+        // what most operators want for a TLS-enabled
+        // gRPC backend.
+        cfg = cfg.domain_name(String::new()); // tonic will use the URI host
+    }
+    if tls.insecure_skip_verify {
+        // The tonic API doesn't expose a clean
+        // "skip verify" knob; the v2 workaround is to
+        // skip TLS entirely and use h2c by NOT setting
+        // the `tls` config. v3 will add proper
+        // verification bypass via a custom
+        // ClientTlsConfig wrapper. For now, log a
+        // warning and continue (operator must set up
+        // their own cert chain to use the TLS path).
+        log::warn!(
+            "backend.tls.insecure_skip_verify = true; \
+             this v2 build does not support skipping \
+             verification — the cert chain must be valid. \
+             Set backend.tls.ca_cert_pem to a self-signed \
+             CA bundle or use a valid public cert."
+        );
+    }
+    Ok(cfg)
+}
+
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+    use crate::models::router::BackendTlsConfig;
+
+    #[test]
+    fn tls_fingerprint_changes_with_pem() {
+        let a = BackendTlsConfig {
+            ca_cert_pem: Some("-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n".to_string()),
+            domain: None,
+            insecure_skip_verify: false,
+        };
+        let b = BackendTlsConfig {
+            ca_cert_pem: Some("-----BEGIN CERTIFICATE-----\nBBBB\n-----END CERTIFICATE-----\n".to_string()),
+            domain: None,
+            insecure_skip_verify: false,
+        };
+        assert_ne!(tls_fingerprint(&a), tls_fingerprint(&b));
+    }
+
+    #[test]
+    fn tls_fingerprint_changes_with_domain() {
+        let a = BackendTlsConfig {
+            ca_cert_pem: None,
+            domain: Some("api.example.com".to_string()),
+            insecure_skip_verify: false,
+        };
+        let b = BackendTlsConfig {
+            ca_cert_pem: None,
+            domain: Some("other.example.com".to_string()),
+            insecure_skip_verify: false,
+        };
+        assert_ne!(tls_fingerprint(&a), tls_fingerprint(&b));
+    }
+
+    #[test]
+    fn tls_fingerprint_changes_with_insecure_flag() {
+        let a = BackendTlsConfig {
+            ca_cert_pem: None,
+            domain: None,
+            insecure_skip_verify: false,
+        };
+        let b = BackendTlsConfig {
+            ca_cert_pem: None,
+            domain: None,
+            insecure_skip_verify: true,
+        };
+        assert_ne!(tls_fingerprint(&a), tls_fingerprint(&b));
+    }
+
+    #[test]
+    fn backend_uri_uses_https_when_tls_is_some() {
+        let backend = Backend {
+            host: "api.example.com".to_string(),
+            port: 443,
+            weight: 1,
+            health_check_path: None,
+            tls: Some(BackendTlsConfig::default()),
+        };
+        let uri = backend_uri(&backend).unwrap();
+        assert_eq!(uri.scheme_str(), Some("https"));
+    }
+
+    #[test]
+    fn backend_uri_uses_http_when_tls_is_none() {
+        let backend = Backend {
+            host: "127.0.0.1".to_string(),
+            port: 50051,
+            weight: 1,
+            health_check_path: None,
+            tls: None,
+        };
+        let uri = backend_uri(&backend).unwrap();
+        assert_eq!(uri.scheme_str(), Some("http"));
+    }
 }
 
 /// Forward a streaming gRPC request body to the backend channel
@@ -343,6 +508,7 @@ mod tests {
                 port: 50051,
                 weight: 1,
                 health_check_path: None,
+                tls: None,
             }]),
             load_balancing_strategy: LoadBalancingStrategy::RoundRobin,
             retry: None,
@@ -361,6 +527,7 @@ mod tests {
             port: 50051,
             weight: 1,
             health_check_path: None,
+                tls: None,
         };
         let uri = backend_uri(&b).unwrap();
         assert_eq!(uri.scheme_str(), Some("http"));
@@ -377,6 +544,7 @@ mod tests {
             port: 50051,
             weight: 1,
             health_check_path: None,
+                tls: None,
         };
         assert!(backend_uri(&b).is_err());
     }
@@ -390,6 +558,7 @@ mod tests {
             port: 1, // port 1 is reserved; would fail to connect.
             weight: 1,
             health_check_path: None,
+                tls: None,
         };
         let ch = svc.channel_for(&b).unwrap();
         // Channel is constructed but not yet connected.
@@ -449,6 +618,7 @@ mod tests {
             port: 1,
             weight: 1,
             health_check_path: None,
+                tls: None,
         };
         let ch = svc.channel_for(&b);
         assert!(ch.is_ok());

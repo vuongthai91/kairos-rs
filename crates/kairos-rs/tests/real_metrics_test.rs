@@ -21,6 +21,7 @@ async fn test_real_metrics_collection() {
                 port: 8080,
                 weight: 1,
                 health_check_path: None,
+                tls: None,
             }]),
             load_balancing_strategy: Default::default(),
             retry: None,

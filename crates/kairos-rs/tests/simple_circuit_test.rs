@@ -21,6 +21,7 @@ async fn test_simple_circuit_breaker() {
                     port: 9999,
                     weight: 1,
                     health_check_path: None,
+                    tls: None,
                 }
             ]),
             load_balancing_strategy: Default::default(),
