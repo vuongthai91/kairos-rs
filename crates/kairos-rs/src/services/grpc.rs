@@ -49,10 +49,13 @@ pub const DEFAULT_GRPC_TIMEOUT_SECS: u64 = 30;
 /// Factory that builds (and lazily connects) a `tonic::transport::Channel`
 /// for each configured backend. The factory is intentionally cheap to
 /// clone so the route handler can hold a handle without lifetime
-/// gymnastics.
+/// gymnastics. v2 holds a [`GrpcChannelPool`](crate::services::grpc_pool::GrpcChannelPool)
+/// so channels are reused across requests instead of recreated on
+/// every call.
 #[derive(Clone)]
 pub struct GrpcService {
     timeout: Duration,
+    pool: crate::services::grpc_pool::GrpcChannelPool,
 }
 
 impl GrpcService {
@@ -60,6 +63,7 @@ impl GrpcService {
     pub fn new() -> Self {
         Self {
             timeout: Duration::from_secs(DEFAULT_GRPC_TIMEOUT_SECS),
+            pool: crate::services::grpc_pool::GrpcChannelPool::new(),
         }
     }
 
@@ -69,15 +73,27 @@ impl GrpcService {
         self
     }
 
-    /// Build (or reuse) a `tonic` channel for `backend`. We use
-    /// `connect_lazy` so the channel is created synchronously and
-    /// the first real connection attempt happens on the first
-    /// request. This avoids blocking the actix worker pool on
-    /// TCP handshakes.
+    /// Return a reference to the connection pool (for metrics).
+    pub fn pool(&self) -> &crate::services::grpc_pool::GrpcChannelPool {
+        &self.pool
+    }
+
+    /// Build (or reuse) a `tonic` channel for `backend`.
+    /// v2: on cache hit, returns the existing channel without
+    /// touching the network. On miss, creates a new
+    /// `connect_lazy` channel, inserts it into the pool, and
+    /// returns it. The first real connection attempt happens
+    /// on the first request through the new channel, so
+    /// `channel_for` never blocks on TCP.
     pub fn channel_for(&self, backend: &Backend) -> Result<Channel, GrpcError> {
+        let key = crate::services::grpc_pool::BackendKey::from_backend(backend);
+        if let Some(ch) = self.pool.get(&key) {
+            return Ok(ch);
+        }
         let uri = backend_uri(backend)?;
-        let endpoint = tonic::transport::Endpoint::new(uri)?.connect_lazy();
-        Ok(endpoint)
+        let channel = tonic::transport::Endpoint::new(uri)?.connect_lazy();
+        self.pool.insert(key, channel.clone());
+        Ok(channel)
     }
 }
 
