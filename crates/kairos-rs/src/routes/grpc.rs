@@ -83,6 +83,30 @@ pub async fn grpc_catch_all(
     let route = match find_route(state.routers.as_ref(), &path) {
         Some(r) => r,
         None => {
+            // gRPC reflection fallback: paths starting with
+            // `grpc.reflection.v1alpha.ServerReflection/` or
+            // `grpc.reflection.v1.ServerReflection/` are
+            // forwarded to the first backend of any gRPC
+            // route that has backends. This lets `grpcurl
+            // --plaintext` (or any reflection-aware client)
+            // discover the gateway's exposed services
+            // without an explicit route config. If no gRPC
+            // route has backends, fall through to 404.
+            if is_reflection_path(&path) {
+                if let Some(fallback_idx) = first_grpc_backend_index(state.routers.as_ref()) {
+                    let backend = state.routers[fallback_idx]
+                        .backends
+                        .as_ref()
+                        .and_then(|bs| bs.first())
+                        .expect("checked non-empty by helper");
+                    warn!(
+                        "grpc: reflection path {} routed to fallback backend {}/{}",
+                        path, backend.host, backend.port
+                    );
+                    let service = state.service.clone();
+                    return forward_to_backend(service, &req, body, backend, &path).await;
+                }
+            }
             warn!("grpc: no route for {}", path);
             return Ok(HttpResponse::NotFound()
                 .content_type("application/grpc")
@@ -102,6 +126,21 @@ pub async fn grpc_catch_all(
         }
     };
 
+    let service = state.service.clone();
+    forward_to_backend(service, &req, body, backend, &path).await
+}
+
+/// Forward `body` to `backend` over gRPC. The body is
+/// consumed lazily (no pre-buffering) so this function
+/// handles all 4 gRPC call types. Used by both the main
+/// route dispatch and the reflection fallback (commit 5).
+async fn forward_to_backend(
+    service: GrpcService,
+    req: &HttpRequest,
+    body: web::Payload,
+    backend: &crate::models::router::Backend,
+    path: &str,
+) -> Result<HttpResponse, ActixError> {
     // Build the upstream request URI, preserving the inbound
     // content type so the backend can choose the right
     // deserializer. The body is consumed lazily: we wrap the
@@ -166,7 +205,7 @@ pub async fn grpc_catch_all(
         }
     };
 
-    match forward_streaming(&state.service, backend, request).await {
+    match forward_streaming(&service, backend, request).await {
         Ok(response) => {
             // Stream the response body. actix's `streaming()`
             // accepts a `Stream<Item = Result<Bytes, E>>` and
@@ -194,6 +233,29 @@ pub async fn grpc_catch_all(
             .content_type("application/grpc")
             .body(grpc_error_frame(14, "upstream unreachable"))),
     }
+}
+
+/// Return `true` if `path` is a gRPC server-reflection
+/// request. The v1 alpha and v1 stable paths are both
+/// recognised. Used by the reflection fallback in
+/// `grpc_catch_all`.
+fn is_reflection_path(path: &str) -> bool {
+    path.starts_with("/grpc.reflection.v1alpha.ServerReflection/")
+        || path.starts_with("/grpc.reflection.v1.ServerReflection/")
+}
+
+/// Find the index of the first gRPC route in `routers`
+/// that has a non-empty `backends` field. Used by the
+/// reflection fallback in `grpc_catch_all`. We return an
+/// index instead of a borrow so the caller can re-index
+/// into `routers` after the borrow on `state.routers`
+/// has been released (avoids a borrow-checker conflict
+/// when we then move `state` into `forward_to_backend`).
+fn first_grpc_backend_index(routers: &[Router]) -> Option<usize> {
+    routers.iter().position(|r| {
+        matches!(r.protocol, crate::models::router::Protocol::Grpc)
+            && r.backends.as_ref().is_some_and(|bs| !bs.is_empty())
+    })
 }
 
 /// Build a single-frame gRPC error body for the cases where the
@@ -254,5 +316,50 @@ mod tests {
         let body = std::str::from_utf8(&frame[5..]).unwrap();
         assert!(body.contains("grpc-status: 14"));
         assert!(body.contains("grpc-message: unavailable"));
+    }
+
+    #[test]
+    fn is_reflection_path_matches_v1_alpha_and_v1() {
+        assert!(is_reflection_path("/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo"));
+        assert!(is_reflection_path("/grpc.reflection.v1.ServerReflection/ServerReflectionInfo"));
+        assert!(!is_reflection_path("/grpc.health.v1.Health/Check"));
+        assert!(!is_reflection_path("/foo/bar"));
+        assert!(!is_reflection_path("/"));
+    }
+
+    #[test]
+    fn first_grpc_backend_index_returns_none_when_no_grpc_routes() {
+        let routers = vec![];
+        assert_eq!(first_grpc_backend_index(&routers), None);
+    }
+
+    #[test]
+    fn first_grpc_backend_index_finds_first_grpc_route_with_backends() {
+        use crate::models::router::{Backend, LoadBalancingStrategy, Protocol, Router};
+        let routers = vec![
+            Router {
+                host: None,
+                port: None,
+                external_path: "/api/grpc/".to_string(),
+                internal_path: String::new(),
+                methods: vec!["POST".to_string()],
+                auth_required: false,
+                backends: Some(vec![Backend {
+                    host: "api.example.com".to_string(),
+                    port: 443,
+                    weight: 1,
+                    health_check_path: None,
+                    tls: None,
+                }]),
+                load_balancing_strategy: LoadBalancingStrategy::RoundRobin,
+                retry: None,
+                protocol: Protocol::Grpc,
+                request_transformation: None,
+                response_transformation: None,
+                ai_policy: None,
+                cache: None,
+            },
+        ];
+        assert_eq!(first_grpc_backend_index(&routers), Some(0));
     }
 }
