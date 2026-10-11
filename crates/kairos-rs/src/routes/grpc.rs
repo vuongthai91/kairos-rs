@@ -130,23 +130,16 @@ pub async fn grpc_catch_all(
 
     match forward_unary(&state.service, backend, request).await {
         Ok(response) => {
-            // We have to convert the tonic `BoxBody` response body
-            // back into an actix `web::Bytes` for the client. v1
-            // only handles unary responses (single frame); a v2
-            // streaming implementation will need an
-            // actix-web `StreamingBody`.
-            use http_body_util::BodyExt;
-            let collected = match response.into_body().collect().await {
-                Ok(c) => c.to_bytes(),
-                Err(_) => {
-                    return Ok(HttpResponse::BadGateway()
-                        .content_type("application/grpc")
-                        .body(grpc_error_frame(14, "upstream body error")));
-                }
-            };
+            // Stream the response body. actix's `streaming()`
+            // accepts a `Stream<Item = Result<Bytes, E>>` and
+            // writes each chunk as it arrives. Works for
+            // unary, server-streaming, and bidi-streaming
+            // responses: a unary response is just a 1-frame
+            // stream.
+            let stream = crate::services::grpc_stream::TonicBodyStream::new(response.into_body());
             Ok(HttpResponse::Ok()
                 .content_type("application/grpc")
-                .body(collected))
+                .streaming(stream))
         }
         Err(crate::services::grpc::GrpcError::Timeout) => Ok(HttpResponse::GatewayTimeout()
             .content_type("application/grpc")

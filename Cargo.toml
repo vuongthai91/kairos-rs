@@ -53,11 +53,15 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-opentelemetry = "0.25"
 # gRPC proxying (PR9)
 http = "1"
+http-body = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1", "http2"] }
 tonic = "0.12"
 tower = { version = "0.4", features = ["util"] }
 tower-service = "0.3"
+# PR9 v2 (streaming) deps
+futures-core = "0.3"
+pin-project-lite = "0.2"
 
 # Protocol-specific dependencies
 tokio-tungstenite = "0.21"

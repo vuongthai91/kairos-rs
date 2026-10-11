@@ -46,11 +46,15 @@ tracing-subscriber.workspace = true
 tracing-opentelemetry.workspace = true
 # gRPC proxying (PR9)
 http.workspace = true
+http-body.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 tonic.workspace = true
 tower.workspace = true
 tower-service.workspace = true
+# PR9 v2 (streaming) deps
+futures-core.workspace = true
+pin-project-lite.workspace = true
 
 # Protocol-specific dependencies
 tokio-tungstenite = { version = "0.21" }

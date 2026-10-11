@@ -85,6 +85,7 @@ pub mod dns;
 pub mod ftp;
 pub mod grpc;
 pub mod grpc_frame;
+pub mod grpc_stream;
 pub mod http;
 pub mod inflight;
 pub mod load_balancer;
