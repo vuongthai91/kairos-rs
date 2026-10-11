@@ -155,18 +155,41 @@ pub enum GrpcError {
 /// backend hop). External-facing gRPC should still be
 /// terminated by a TLS sidecar (envoy, nginx) when TLS is
 /// disabled.
+///
+/// `Backend.host` is validated to start with a scheme
+/// (`http://`, `https://`, `ws://`, `wss://`) by
+/// `Backend::validate`, so we strip any scheme before
+/// prefixing our own. Without this strip the
+/// scheme would be doubled
+/// (`https://http://host:50051`) and tonic would fail
+/// DNS resolution on the malformed hostname.
 fn backend_uri(backend: &Backend) -> Result<http::Uri, GrpcError> {
-    let host = &backend.host;
+    let host = strip_scheme(&backend.host);
     let port = backend.port;
     let scheme = if backend.tls.is_some() { "https" } else { "http" };
     let candidate = format!("{}://{}:{}", scheme, host, port);
     candidate
         .parse::<http::Uri>()
         .map_err(|e| GrpcError::InvalidBackendUri {
-            host: host.clone(),
+            host: host.to_string(),
             port,
             reason: e.to_string(),
         })
+}
+
+/// Strip any of the four valid scheme prefixes
+/// (`http://`, `https://`, `ws://`, `wss://`) from a
+/// backend host string. Returns the remainder
+/// unchanged if no scheme is present (which is
+/// unexpected given config validation but tolerated
+/// for safety).
+fn strip_scheme(host: &str) -> &str {
+    for prefix in &["http://", "https://", "ws://", "wss://"] {
+        if let Some(rest) = host.strip_prefix(prefix) {
+            return rest;
+        }
+    }
+    host
 }
 
 /// Hash the `BackendTlsConfig` into a stable `u64` for the
@@ -295,6 +318,37 @@ mod tls_tests {
         };
         let uri = backend_uri(&backend).unwrap();
         assert_eq!(uri.scheme_str(), Some("https"));
+    }
+
+    #[test]
+    fn strip_scheme_removes_all_four_valid_schemes() {
+        assert_eq!(strip_scheme("http://host:50051"), "host:50051");
+        assert_eq!(strip_scheme("https://host:50051"), "host:50051");
+        assert_eq!(strip_scheme("ws://host:50051"), "host:50051");
+        assert_eq!(strip_scheme("wss://host:50051"), "host:50051");
+        assert_eq!(strip_scheme("host:50051"), "host:50051");
+        // Full URI with no scheme is left alone (rare; would fail config validation).
+        assert_eq!(strip_scheme("host"), "host");
+    }
+
+    #[test]
+    fn backend_uri_strips_incoming_scheme_to_avoid_double_prefix() {
+        // Regression: v2 used to produce
+        // `https://http://host.docker.internal:50051` when the
+        // config had `host: "http://host.docker.internal"` and
+        // `tls: Some(...)`. The fix: strip the incoming scheme
+        // before prefixing our own.
+        let backend = Backend {
+            host: "http://host.docker.internal".to_string(),
+            port: 50051,
+            weight: 1,
+            health_check_path: None,
+            tls: Some(BackendTlsConfig::default()),
+        };
+        let uri = backend_uri(&backend).unwrap();
+        assert_eq!(uri.scheme_str(), Some("https"));
+        assert_eq!(uri.host(), Some("host.docker.internal"));
+        assert_eq!(uri.port_u16(), Some(50051));
     }
 
     #[test]
