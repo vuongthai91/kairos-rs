@@ -60,6 +60,7 @@ pin-project-lite.workspace = true
 tokio-tungstenite = { version = "0.21" }
 actix-ws = { version = "0.2" }
 hickory-proto = { version = "0.24" }
+hickory-resolver = { version = "0.24", features = ["tokio"] }
 suppaftp = { version = "5.3", features = ["async", "async-secure"] }
 hex = "0.4"
 rig-core = "0.29.0"

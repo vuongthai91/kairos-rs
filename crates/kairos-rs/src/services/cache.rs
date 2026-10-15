@@ -338,6 +338,7 @@ mod tests {
                 max_size: 100,
                 coalesce: false,
             }),
+            discovery: None,
         };
         assert!(!should_cache_route(&r), "must skip cache for auth_required");
     }
@@ -365,6 +366,7 @@ mod tests {
                 max_size: 100,
                 coalesce: false,
             }),
+            discovery: None,
         };
         assert!(should_cache_route(&r), "should cache public + enabled");
     }
@@ -392,6 +394,7 @@ mod tests {
                 max_size: 100,
                 coalesce: false,
             }),
+            discovery: None,
         };
         assert!(!should_cache_route(&r), "must skip when cache.enabled=false");
     }
@@ -414,6 +417,7 @@ mod tests {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+            discovery: None,
         };
         assert!(!should_cache_route(&r), "must skip when cache field absent");
     }

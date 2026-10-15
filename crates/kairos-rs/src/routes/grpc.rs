@@ -371,6 +371,7 @@ mod tests {
                 response_transformation: None,
                 ai_policy: None,
                 cache: None,
+                discovery: None,
             },
         ];
         assert_eq!(first_grpc_backend_index(&routers), Some(0));

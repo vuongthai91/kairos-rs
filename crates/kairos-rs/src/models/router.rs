@@ -616,6 +616,18 @@ pub struct Router {
     /// subsequent identical requests. See [`CacheConfig`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache: Option<CacheConfig>,
+
+    /// Optional service-discovery configuration. When set, the
+    /// gateway periodically replaces this route's `backends` with
+    /// the resolved list. If the source can't be reached the route
+    /// fails closed (returns 503) until the next successful refresh.
+    ///
+    /// Supports three sources:
+    /// - `dns` (SRV / A / AAAA records, works with kube-dns / CoreDNS)
+    /// - `consul` (Consul HTTP catalog)
+    /// - `static` (literal `host:port` fallback)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discovery: Option<crate::services::discovery::DiscoverySpec>,
 }
 
 impl Router {

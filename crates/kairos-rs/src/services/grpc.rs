@@ -571,6 +571,7 @@ mod tests {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+            discovery: None,
         }
     }
 

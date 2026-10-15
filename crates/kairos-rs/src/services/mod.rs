@@ -81,6 +81,7 @@
 pub mod ai;
 pub mod circuit_breaker;
 pub mod cache;
+pub mod discovery;
 pub mod dns;
 pub mod ftp;
 pub mod grpc;
