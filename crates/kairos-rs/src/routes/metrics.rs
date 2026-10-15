@@ -641,7 +641,12 @@ impl MetricsCollector {
         let b1s = self.response_time_bucket_1s.load(Ordering::Relaxed);
         let b5s = self.response_time_bucket_5s.load(Ordering::Relaxed);
         let b_inf = self.response_time_bucket_inf.load(Ordering::Relaxed);
-        let total = b_inf;
+        // `total` is the grand total of all requests — derived from the
+        // bucket with the largest coverage (`b_5s` covers everything
+        // up to 5s; `b_inf` covers >= 5s). Taking `b_5s + b_inf` gives
+        // the count of all observed requests. We use `b_5s` as the
+        // tightest cumulative that always includes everything below 5s.
+        let total = b5s + b_inf;
         if total == 0 {
             return (0.0, 0.0, 0.0);
         }
