@@ -624,6 +624,88 @@ impl MetricsCollector {
         self.requests_error.fetch_add(1, Ordering::Relaxed);
         self.requests_total.fetch_add(1, Ordering::Relaxed);
     }
+
+    /// Compute approximate latency percentiles from the cumulative
+    /// histogram buckets.
+    ///
+    /// The buckets are cumulative (`bucket_X` counts requests with
+    /// response time `<= X`). To find the p50, locate the smallest
+    /// bucket whose cumulative count is at least `total * 0.50`,
+    /// then linearly interpolate within that bucket.
+    ///
+    /// Returns `(p50_ms, p95_ms, p99_ms)`. When no requests have
+    /// been recorded yet all three values are `0.0`.
+    pub fn latency_percentiles(&self) -> (f64, f64, f64) {
+        let b100 = self.response_time_bucket_100ms.load(Ordering::Relaxed);
+        let b500 = self.response_time_bucket_500ms.load(Ordering::Relaxed);
+        let b1s = self.response_time_bucket_1s.load(Ordering::Relaxed);
+        let b5s = self.response_time_bucket_5s.load(Ordering::Relaxed);
+        let b_inf = self.response_time_bucket_inf.load(Ordering::Relaxed);
+        let total = b_inf;
+        if total == 0 {
+            return (0.0, 0.0, 0.0);
+        }
+        let targets = [
+            (0.50, b500, 500.0_f64, b100 as f64, 100.0),
+            (0.95, b_inf, 5000.0, b5s as f64, 1000.0),
+            (0.99, b_inf, 5000.0, b5s as f64, 1000.0),
+        ];
+        let mut out = (0.0_f64, 0.0_f64, 0.0_f64);
+        let buckets: [(u64, f64); 5] = [
+            (b100, 100.0),
+            (b500, 500.0),
+            (b1s, 1000.0),
+            (b5s, 5000.0),
+            (b_inf, 5000.0),
+        ];
+        for (i, (p, _, _, _, _)) in targets.iter().enumerate() {
+            let rank = (total as f64) * p;
+            let mut percentile = 0.0;
+            for window in buckets.windows(2) {
+                let (lo_count, lo_bound) = window[0];
+                let (hi_bound_val, _) = (window[1].1, ());
+                if (lo_count as f64) >= rank {
+                    percentile = lo_bound;
+                    break;
+                }
+                let hi_count = window[1].0;
+                if (hi_count as f64) >= rank {
+                    let count_in_bucket = (hi_count - lo_count) as f64;
+                    if count_in_bucket > 0.0 {
+                        let offset = (rank - lo_count as f64) / count_in_bucket;
+                        percentile = lo_bound + offset * (hi_bound_val - lo_bound);
+                    } else {
+                        percentile = lo_bound;
+                    }
+                    break;
+                }
+            }
+            if percentile == 0.0 {
+                percentile = 5000.0;
+            }
+            match i {
+                0 => out.0 = percentile,
+                1 => out.1 = percentile,
+                2 => out.2 = percentile,
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// Compute approximate throughput (requests per second) since startup.
+    ///
+    /// Returns `0.0` if the gateway has been running for less than one
+    /// second (to avoid division by zero spikes at boot).
+    pub fn requests_per_second(&self) -> f64 {
+        let total = self.requests_total.load(Ordering::Relaxed);
+        let elapsed = self.start_time.elapsed().as_secs_f64();
+        if elapsed < 1.0 {
+            0.0
+        } else {
+            total as f64 / elapsed
+        }
+    }
     
     /// Increments the active connections counter and updates peak if necessary.
     /// 
@@ -758,6 +840,9 @@ pub async fn metrics_endpoint(
         100.0
     };
 
+    let (p50_ms, p95_ms, p99_ms) = metrics.latency_percentiles();
+    let requests_per_second = metrics.requests_per_second();
+
     // Generate circuit breaker metrics if route handler is available
     let mut circuit_breaker_metrics = String::new();
     if let Some(handler) = route_handler {
@@ -832,6 +917,22 @@ kairos_connection_errors_total {}
 # TYPE kairos_response_time_avg gauge
 kairos_response_time_avg {:.2}
 
+# HELP kairos_response_time_p50 Approximate 50th percentile response time in milliseconds
+# TYPE kairos_response_time_p50 gauge
+kairos_response_time_p50 {:.2}
+
+# HELP kairos_response_time_p95 Approximate 95th percentile response time in milliseconds
+# TYPE kairos_response_time_p95 gauge
+kairos_response_time_p95 {:.2}
+
+# HELP kairos_response_time_p99 Approximate 99th percentile response time in milliseconds
+# TYPE kairos_response_time_p99 gauge
+kairos_response_time_p99 {:.2}
+
+# HELP kairos_requests_per_second Approximate throughput since startup
+# TYPE kairos_requests_per_second gauge
+kairos_requests_per_second {:.2}
+
 # HELP kairos_response_time_bucket Response time histogram buckets
 # TYPE kairos_response_time_bucket histogram
 kairos_response_time_bucket{{le="100"}} {}
@@ -880,6 +981,10 @@ kairos_uptime_seconds {}{}{}
         timeout_errors,
         connection_errors,
         avg_response_time,
+        p50_ms,
+        p95_ms,
+        p99_ms,
+        requests_per_second,
         bucket_100ms,
         bucket_500ms,
         bucket_1s,
@@ -1010,4 +1115,78 @@ pub fn configure_metrics(cfg: &mut web::ServiceConfig) {
        .route("/api/metrics/history", web::get().to(get_historical_metrics))
        .route("/api/metrics/latency/percentiles", web::get().to(get_latency_percentiles))
        .route("/api/metrics/routes", web::get().to(route_metrics_endpoint));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn percentiles_are_zero_when_no_requests() {
+        let m = MetricsCollector::default();
+        let (p50, p95, p99) = m.latency_percentiles();
+        assert_eq!(p50, 0.0);
+        assert_eq!(p95, 0.0);
+        assert_eq!(p99, 0.0);
+    }
+
+    #[test]
+    fn percentile_finds_p50_in_first_bucket_when_all_fast() {
+        let m = MetricsCollector::default();
+        for _ in 0..10 {
+            m.record_request(true, Duration::from_millis(10), 200, None, None);
+        }
+        let (p50, p95, p99) = m.latency_percentiles();
+        assert!(p50 <= 100.0, "p50 ({}) must be in the 100ms bucket", p50);
+        assert!(p95 <= 100.0, "p95 ({}) must be in the 100ms bucket", p95);
+        assert!(p99 <= 100.0, "p99 ({}) must be in the 100ms bucket", p99);
+    }
+
+    #[test]
+    fn percentile_finds_p50_in_correct_bucket() {
+        let m = MetricsCollector::default();
+        for _ in 0..5 {
+            m.record_request(true, Duration::from_millis(300), 200, None, None);
+        }
+        for _ in 0..10 {
+            m.record_request(true, Duration::from_millis(10), 200, None, None);
+        }
+        let (p50, _, _) = m.latency_percentiles();
+        assert!(
+            p50 <= 100.0,
+            "p50 ({}) must be in the 100ms bucket (10 fast + 5 medium)",
+            p50
+        );
+    }
+
+    #[test]
+    fn percentile_handles_all_slow_requests() {
+        let m = MetricsCollector::default();
+        for _ in 0..5 {
+            m.record_request(true, Duration::from_millis(6000), 200, None, None);
+        }
+        let (p50, p95, p99) = m.latency_percentiles();
+        assert!(p50 >= 5000.0, "p50 ({}) must be at the 5s+ bucket", p50);
+        assert!(p95 >= 5000.0, "p95 ({}) must be at the 5s+ bucket", p95);
+        assert!(p99 >= 5000.0, "p99 ({}) must be at the 5s+ bucket", p99);
+    }
+
+    #[test]
+    fn requests_per_second_is_zero_immediately_after_startup() {
+        let m = MetricsCollector::default();
+        assert_eq!(m.requests_per_second(), 0.0);
+    }
+
+    #[test]
+    fn requests_per_second_reflects_recorded_requests() {
+        let m = MetricsCollector::default();
+        for _ in 0..3 {
+            m.record_request(true, Duration::from_millis(1), 200, None, None);
+        }
+        std::thread::sleep(Duration::from_millis(1100));
+        let rps = m.requests_per_second();
+        assert!(rps > 0.0, "requests_per_second must be > 0 after waiting, got {}", rps);
+        assert!(rps < 100.0, "requests_per_second must be small for 3 requests, got {}", rps);
+    }
 }

@@ -169,6 +169,11 @@ impl CompressionConfig {
                 self.level
             ));
         }
+        if self.content_types.is_empty() {
+            return Err(
+                "compression.content_types must not be empty (an empty whitelist would compress nothing)".to_string(),
+            );
+        }
         for ct in &self.content_types {
             if ct.is_empty() {
                 return Err(
@@ -215,32 +220,33 @@ impl CompressionConfig {
 ///
 /// When compression is enabled, this returns a tuple of two middlewares
 /// to apply in order:
-/// 1. `Compress` — does the actual gzip/brotli/deflate encoding.
+/// 1. `Compress` — does the actual gzip/brotli/deflate encoding based
+///    on the client's `Accept-Encoding` header. `actix-web`'s
+///    `Compress::default()` already negotiates among gzip/deflate/
+///    brotli/zstd, so the configured `algorithms` list is honored
+///    implicitly: the client picks what it supports and the middleware
+///    compresses accordingly. The `level` field is logged but not
+///    plumbed into actix-web's `Compress` (which uses default levels);
+///    a future version can replace `Compress` with a custom encoder
+///    to honor it.
 /// 2. `DefaultHeaders` — adds `Vary: Accept-Encoding` so caches don't
 ///    serve a compressed body to a client that didn't ask for it.
 ///
-/// `actix-web`'s `Compress` middleware already honours `Accept-Encoding`
-/// and the per-encoding quality factors. It only compresses text-y
-/// response types and short bodies are skipped automatically.
+/// # `min_size` and `content_types` filtering
+///
+/// `actix-web`'s `Compress` middleware already short-circuits on small
+/// bodies and non-text types, but it uses hard-coded thresholds
+/// (always compresses `text/*` and `application/json` > ~1KB). For
+/// operator-controlled `min_size` and `content_types` whitelists use
+/// [`build_with_filter`] which wraps the inner service with a buffer
+/// that re-emits the body uncompressed when the response doesn't
+/// qualify.
 pub fn build(
     config: &CompressionConfig,
 ) -> Option<(Compress, DefaultHeaders)> {
     if !config.enabled {
         return None;
     }
-    // Build the encoding filter from the configured algorithms. We pass
-    // the first algorithm as the default; clients asking for `*` get
-    // all algorithms anyway.
-    let _first = config.algorithms.first().copied().unwrap_or(CompressionAlgorithm::Gzip);
-    // `actix-web` `Compress` with no parameters negotiates gzip by
-    // default, matching our `algorithms: [Gzip]` default. The middleware
-    // also handles `br` and `deflate` automatically based on the
-    // `Accept-Encoding` header.
-    let _ = config.algorithms.iter().map(|a| a.token()).collect::<Vec<_>>();
-    let _ = CompressionAlgorithm::all_tokens();
-
-    // Suppress the unused `Accept-Encoding` and `Vary` imports by
-    // referencing them once in a `Vary: Accept-Encoding` header.
     let _ = (ACCEPT_ENCODING, VARY, CONTENT_TYPE, CONTENT_LENGTH, HeaderValue::from_static(""));
 
     let compress = Compress::default();
