@@ -49,6 +49,8 @@ fn make_router(auth_required: bool, cache_enabled: bool) -> Router {
         } else {
             None
         },
+        discovery: None,
+        ws_compression: None,
     }
 }
 

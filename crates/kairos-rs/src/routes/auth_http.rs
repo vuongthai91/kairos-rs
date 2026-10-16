@@ -195,6 +195,16 @@ async fn handle_websocket_route(
     
     // Use the internal_path from the router configuration
     let internal_path = &router.internal_path;
-    
-    ws_handler.handle_websocket(req, stream, backend, internal_path).await
+
+    // Honor the optional per-route WebSocket compression config.
+    // When present, the proxy negotiates permessage-deflate with
+    // both sides and compresses message bodies on the wire.
+    let compression = router
+        .ws_compression
+        .as_ref()
+        .map(|cfg| cfg.to_compression_config());
+
+    ws_handler
+        .handle_websocket(req, stream, backend, internal_path, compression.as_ref())
+        .await
 }

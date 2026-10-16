@@ -104,7 +104,7 @@
 - **Route UI limitations** - Currently supports basic single-backend mode only (multi-backend, load balancing, retry config UI coming soon)
 - [x] No historical metrics with time-series charts yet
 - **Protocol-specific features**:
-  - WebSocket: Advanced compression and custom protocol extensions
+  - [x] WebSocket: permessage-deflate (RFC 7692) with extension negotiation, server_no_context_takeover, client_max_window_bits
   - FTP: FTPS/SFTP support and advanced file operations
   - DNS: TCP support and DNSSEC validation
 

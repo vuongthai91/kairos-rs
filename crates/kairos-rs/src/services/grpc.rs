@@ -572,6 +572,7 @@ mod tests {
             ai_policy: None,
             cache: None,
             discovery: None,
+            ws_compression: None,
         }
     }
 

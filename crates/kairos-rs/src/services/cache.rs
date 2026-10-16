@@ -339,6 +339,7 @@ mod tests {
                 coalesce: false,
             }),
             discovery: None,
+            ws_compression: None,
         };
         assert!(!should_cache_route(&r), "must skip cache for auth_required");
     }
@@ -367,6 +368,7 @@ mod tests {
                 coalesce: false,
             }),
             discovery: None,
+            ws_compression: None,
         };
         assert!(should_cache_route(&r), "should cache public + enabled");
     }
@@ -395,6 +397,7 @@ mod tests {
                 coalesce: false,
             }),
             discovery: None,
+            ws_compression: None,
         };
         assert!(!should_cache_route(&r), "must skip when cache.enabled=false");
     }
@@ -418,6 +421,7 @@ mod tests {
             ai_policy: None,
             cache: None,
             discovery: None,
+            ws_compression: None,
         };
         assert!(!should_cache_route(&r), "must skip when cache field absent");
     }

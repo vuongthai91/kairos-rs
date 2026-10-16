@@ -31,6 +31,8 @@ fn create_test_router(host: &str, external_path: &str, methods: Vec<&str>) -> Ro
         response_transformation: None,
         ai_policy: None,
         cache: None,
+    discovery: None,
+    ws_compression: None,
     }
 }
 
@@ -210,6 +212,8 @@ fn test_path_traversal_detection() {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+        discovery: None,
+        ws_compression: None,
         }],
         compression: None,
     };

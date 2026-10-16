@@ -96,3 +96,4 @@ pub mod metrics_store;
 pub mod percentile;
 pub mod websocket;
 pub mod websocket_metrics;
+pub mod ws_compression;

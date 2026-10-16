@@ -21,6 +21,8 @@ fn create_test_routes() -> Vec<Router> {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+        discovery: None,
+        ws_compression: None,
         },
         Router {
             host: Some("https://google.com".to_string()),
@@ -38,6 +40,8 @@ fn create_test_routes() -> Vec<Router> {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+        discovery: None,
+        ws_compression: None,
         },
         Router {
             host: Some("https://http.cat".to_string()),
@@ -55,6 +59,8 @@ fn create_test_routes() -> Vec<Router> {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+        discovery: None,
+        ws_compression: None,
         },
         Router {
             host: Some("http://api.example.com".to_string()),
@@ -72,6 +78,8 @@ fn create_test_routes() -> Vec<Router> {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+        discovery: None,
+        ws_compression: None,
         },
         Router {
             host: Some("http://api.example.com".to_string()),
@@ -89,6 +97,8 @@ fn create_test_routes() -> Vec<Router> {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+        discovery: None,
+        ws_compression: None,
         },
         Router {
             host: Some("http://api.example.com".to_string()),
@@ -106,6 +116,8 @@ fn create_test_routes() -> Vec<Router> {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+        discovery: None,
+        ws_compression: None,
         },
         Router {
             host: Some("http://static.example.com".to_string()),
@@ -123,6 +135,8 @@ fn create_test_routes() -> Vec<Router> {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+        discovery: None,
+        ws_compression: None,
         },
         Router {
             host: Some("http://static.example.com".to_string()),
@@ -140,6 +154,8 @@ fn create_test_routes() -> Vec<Router> {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+        discovery: None,
+        ws_compression: None,
         },
     ]
 }
@@ -309,6 +325,8 @@ mod route_matcher_tests {
                 response_transformation: None,
                 ai_policy: None,
                 cache: None,
+            discovery: None,
+            ws_compression: None,
             },
             Router {
                 host: Some("http://localhost".to_string()),
@@ -326,6 +344,8 @@ mod route_matcher_tests {
                 response_transformation: None,
                 ai_policy: None,
                 cache: None,
+            discovery: None,
+            ws_compression: None,
             },
             Router {
                 host: Some("http://localhost".to_string()),
@@ -343,6 +363,8 @@ mod route_matcher_tests {
                 response_transformation: None,
                 ai_policy: None,
                 cache: None,
+            discovery: None,
+            ws_compression: None,
             },
         ];
 

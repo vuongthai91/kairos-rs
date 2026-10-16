@@ -45,6 +45,8 @@ fn create_test_settings() -> Settings {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+        discovery: None,
+        ws_compression: None,
         }],
         compression: None,
     }
@@ -230,6 +232,8 @@ fn test_load_settings_complex_configuration() {
                 response_transformation: None,
                 ai_policy: None,
                 cache: None,
+            discovery: None,
+            ws_compression: None,
             },
             Router {
                 host: Some("http://internal-service".to_string()),
@@ -252,6 +256,8 @@ fn test_load_settings_complex_configuration() {
                 response_transformation: None,
                 ai_policy: None,
                 cache: None,
+            discovery: None,
+            ws_compression: None,
             },
             Router {
                 host: Some("https://auth.example.com".to_string()),
@@ -274,6 +280,8 @@ fn test_load_settings_complex_configuration() {
                 response_transformation: None,
                 ai_policy: None,
                 cache: None,
+            discovery: None,
+            ws_compression: None,
             },
         ],
         compression: None,
@@ -364,6 +372,8 @@ fn test_load_settings_unicode_content() {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+        discovery: None,
+        ws_compression: None,
         }],
         compression: None,
     };

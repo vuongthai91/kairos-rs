@@ -46,6 +46,8 @@ fn make_route(coalesce: bool, auth_required: bool) -> Router {
             max_size: 100,
             coalesce,
         }),
+        discovery: None,
+        ws_compression: None,
     }
 }
 

@@ -628,6 +628,14 @@ pub struct Router {
     /// - `static` (literal `host:port` fallback)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discovery: Option<crate::services::discovery::DiscoverySpec>,
+
+    /// Optional WebSocket permessage-deflate configuration (RFC 7692).
+    /// When set, the gateway transparently negotiates compression on
+    /// the WebSocket route: incoming client messages are compressed
+    /// before being forwarded to the backend, and backend messages
+    /// are decompressed before being sent to the client.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ws_compression: Option<crate::services::ws_compression::RouterCompressionConfig>,
 }
 
 impl Router {
@@ -742,6 +750,15 @@ impl Router {
         // Validate retry configuration if present
         if let Some(retry_config) = &self.retry {
             retry_config.validate()?;
+        }
+
+        // Validate WebSocket compression configuration if present.
+        // Only meaningful for WebSocket routes, but we validate
+        // unconditionally so a typo doesn't slip past config review.
+        if let Some(ws) = &self.ws_compression {
+            ws.validate().map_err(|e| {
+                format!("ws_compression validation failed: {}", e)
+            })?;
         }
 
         Ok(())

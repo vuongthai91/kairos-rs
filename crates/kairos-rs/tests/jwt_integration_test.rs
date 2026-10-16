@@ -53,6 +53,8 @@ fn create_test_settings() -> Settings {
                 response_transformation: None,
                 ai_policy: None,
                 cache: None,
+            discovery: None,
+            ws_compression: None,
             },
             // Protected route - authentication required
             Router {
@@ -76,6 +78,8 @@ fn create_test_settings() -> Settings {
                 response_transformation: None,
                 ai_policy: None,
                 cache: None,
+            discovery: None,
+            ws_compression: None,
             },
         ],
         compression: None,
@@ -219,6 +223,8 @@ async fn test_jwt_config_validation() {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+        discovery: None,
+        ws_compression: None,
         }],
         compression: None,
     };
@@ -266,6 +272,8 @@ async fn test_jwt_secret_validation() {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+        discovery: None,
+        ws_compression: None,
         }],
         compression: None,
     };
@@ -306,6 +314,8 @@ async fn test_jwt_secret_validation() {
             response_transformation: None,
             ai_policy: None,
             cache: None,
+        discovery: None,
+        ws_compression: None,
         }],
         compression: None,
     };

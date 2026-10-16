@@ -42,6 +42,8 @@ fn router_with_backend(backend_host: &str, backend_port: u16) -> Router {
         response_transformation: None,
         ai_policy: None,
         cache: None,
+    discovery: None,
+    ws_compression: None,
     }
 }
 
